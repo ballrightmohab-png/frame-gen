@@ -1,10 +1,12 @@
 {
+  "schema_version": 1,
+  "id": "leviframegen",
+  "name": "LeviFrameGen",
+  "author": "ballrightmohab-png",
+  "version": "2.0.0",
+  "description": "Frame Generation & Camera Smoothing for Minecraft Bedrock (LeviLaunchroid). Motion-compensated temporal synthesis, sub-frame camera smoothing, adaptive frame pacing, and live HUD telemetry.",
   "type": "preload-native",
-  "name": "Levi Frame Generator",
-  "author": "LeviFrameGen",
-  "version": "0.1.0",
-  "entry": "liblevi_framegen.so",
+  "entry": "libframegen.so",
   "minecraft_versions": [],
-  "overwrite_files": [],
-  "overwrite_folders": []
+  "icon": "icon.png"
 }
