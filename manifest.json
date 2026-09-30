@@ -1,0 +1,10 @@
+{
+  "type": "preload-native",
+  "name": "Levi Frame Generator",
+  "author": "LeviFrameGen",
+  "version": "0.1.0",
+  "entry": "liblevi_framegen.so",
+  "minecraft_versions": [],
+  "overwrite_files": [],
+  "overwrite_folders": []
+}
