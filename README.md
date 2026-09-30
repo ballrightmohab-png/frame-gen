@@ -1,8 +1,8 @@
 # LeviFrameGen (`FrameGen.levipack`)
 
-**LeviFrameGen v2.1** is a native `preload-native` C++20 mod for **Minecraft Bedrock Edition on Android (`arm64-v8a`)** running under **LeviLaunchroid (`LeviLauncher`)**.
+**LeviFrameGen v2.2** is a native `preload-native` C++20 mod for **Minecraft Bedrock Edition on Android (`arm64-v8a`)** running under **LeviLaunchroid (`LeviLauncher`)**.
 
-It combines **GPU Frame Generation (`2×` / `3×` / `4×` Max)** with **100% Angle-Conserving Sub-Pixel Camera Smoothing** and full **LeviLaunchroid Mod Menu UI** configuration.
+It combines **GPU Frame Generation & Real-Time FPS Multiplication (`2×` / `3×` / `4×` Max)** with **100% Angle-Conserving Sub-Pixel Camera Smoothing**, a **Low-Latency HUD Optimizer**, and full **LeviLaunchroid Mod Menu UI** configuration — with **zero screen dimming/blackening** and **zero center-screen logos or overlays**.
 
 ---
 
@@ -24,6 +24,9 @@ This gives the cleanest balance of high perceived frame rate, zero HUD/crosshair
 - **Fast-Turn Responsiveness Gain**: **`1.05×`**
 - **Touch Micro-Jitter Deadzone**: **`0.025 deg`**
 - **FOV-Aware Zoom Sensitivity Scaling**: **`ON`**
+- **HUD Optimizer Mode**: **`Ultra Low-Latency`**
+- **HUD Pre-Swap Latency Flush**: **`ON`**
+- **Inventory & GUI Fast-Response Boost**: **`ON`**
 - **Smart Auto-Tune Budget Guard**: **`ON`**
 
 ---
@@ -85,6 +88,9 @@ Ideal when your phone heats up or drops frames in heavy chunks:
 | **Camera Smoothing Strength** | `0.00` – `0.95` | `0.55` | Higher values make slow camera pans silkier. |
 | **Fast-Turn Responsiveness Gain** | `0.10×` – `2.50×` | `1.05×` | Higher values make fast combat flicks snap immediately with zero lag. |
 | **Touch Micro-Jitter Deadzone** | `0.000` – `0.500 deg` | `0.025 deg` | Filters out stationary touchscreen polling noise without losing slow aim. |
+| **HUD Optimizer Mode** | `Off`, `Balanced`, `Ultra Low-Latency` | `Ultra Low-Latency` | Flushes GPU HUD queue before swap and eliminates Android UI canvas redraw lag. |
+| **HUD Pre-Swap Latency Flush** | `ON` / `OFF` | `ON` | Calls `glFlush()` pre-swap so crosshair and hotbar respond with zero buffered frame delay. |
+| **Inventory & GUI Fast-Response Boost** | `ON` / `OFF` | `ON` | Optimizes frame pacing when inventory, chest, or pause menus are open. |
 | **Smart Auto-Tune Budget Guard** | `ON` / `OFF` | `ON` | Steps down synthesis workload during heavy chunk-loading spikes. |
 
 ---

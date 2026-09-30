@@ -97,10 +97,10 @@ bool FrameGenMod::enable(pl::mod::ModContext &context) {
 
     pl::modmenu::ModuleBuilder builder(kModuleId, kModName);
     builder.modId(ownerModId)
-        .description("Frame Generation & Camera Smoothing — motion-compensated "
-                     "temporal synthesis, sub-frame camera smoothing, and "
-                     "adaptive frame pacing.")
+        .description("Frame Generation (2x/3x/4x), Camera Smoothing & HUD "
+                     "Optimizer.")
         .defaultEnabled(true)
+        .hideInHudEditor(true)
         .onToggle(&FrameGenMod::onModuleToggle)
         .onConfigChanged(&FrameGenMod::onConfigChanged);
 
@@ -293,7 +293,8 @@ void FrameGenMod::onFramePresented(const RuntimeTelemetrySnapshot &telemetry) {
         mLastHudPublishNs.load(std::memory_order_relaxed);
     if (lastHud == 0 || (now - lastHud) >= kHudUpdateIntervalNs) {
         mLastHudPublishNs.store(now, std::memory_order_relaxed);
-        if (telemetry.moduleEnabled && cfg.showHud) {
+        if (telemetry.moduleEnabled && cfg.showHud &&
+            !cfg.clearScreenOverlays) {
             HudRenderer::publishHud(cfg, telemetry);
         }
     }

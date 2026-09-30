@@ -224,6 +224,11 @@ pl::modmenu::HudEditorElement HudRenderer::buildHudEditorElement(
 void HudRenderer::publishHud(
     const FrameGenConfig &config,
     const RuntimeTelemetrySnapshot &telemetry) noexcept {
+    if (!telemetry.moduleEnabled || !config.showHud ||
+        config.clearScreenOverlays) {
+        clearHud();
+        return;
+    }
     const auto cmds = buildDrawCommands(config, telemetry);
     pl::modmenu::submitDrawCommands(kModuleId, cmds);
 
@@ -237,6 +242,18 @@ void HudRenderer::clearHud() noexcept {
     pl::modmenu::submitDrawCommands(kModuleId, emptyCmds);
     const std::vector<pl::modmenu::HudEditorElement> emptyElems;
     trySubmitHudEditorElementsDynamic(kModuleId, emptyElems);
+#if defined(__ANDROID__)
+    using UnregisterButtonFn = void (*)(std::string_view);
+    static auto unregFn = reinterpret_cast<UnregisterButtonFn>(dlsym(
+        RTLD_DEFAULT,
+        "_ZN2pl7modmenu16unregisterButtonENSt6__ndk117basic_string_viewIcNS1_"
+        "11char_traitsIcEEEE"));
+    if (unregFn != nullptr) {
+        unregFn("leviframegen.quick_button");
+    }
+#else
+    pl::modmenu::unregisterButton("leviframegen.quick_button");
+#endif
 }
 
 bool HudRenderer::trySetConfigSchemaJson(std::string_view moduleId,

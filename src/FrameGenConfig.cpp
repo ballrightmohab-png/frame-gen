@@ -147,6 +147,22 @@ HudStyle parseHudStyleValue(std::string_view text, HudStyle fallback) noexcept {
     return static_cast<HudStyle>(std::clamp(idx, 0, 2));
 }
 
+HudOptimizerMode parseHudOptimizerModeValue(
+    std::string_view text, HudOptimizerMode fallback) noexcept {
+    if (text == "Off" || text == "off") {
+        return HudOptimizerMode::Off;
+    }
+    if (text == "Balanced" || text == "balanced") {
+        return HudOptimizerMode::Balanced;
+    }
+    if (text == "Ultra Low-Latency" || text == "ultra" ||
+        text == "Ultra Low-Latency (Recommended)") {
+        return HudOptimizerMode::UltraLowLatency;
+    }
+    const int idx = parseIntValue(text, static_cast<int>(fallback));
+    return static_cast<HudOptimizerMode>(std::clamp(idx, 0, 2));
+}
+
 // Lightweight flat JSON object parser for config.json persistence
 bool parseFlatJsonObject(
     std::string_view json,
@@ -277,11 +293,23 @@ const char *hudStyleName(HudStyle style) noexcept {
     case HudStyle::Minimal:
         return "Minimal";
     }
-    return "Detailed";
+    return "Minimal";
+}
+
+const char *hudOptimizerModeName(HudOptimizerMode mode) noexcept {
+    switch (mode) {
+    case HudOptimizerMode::Off:
+        return "Off";
+    case HudOptimizerMode::Balanced:
+        return "Balanced";
+    case HudOptimizerMode::UltraLowLatency:
+        return "Ultra Low-Latency";
+    }
+    return "Ultra Low-Latency";
 }
 
 void FrameGenConfig::normalize() noexcept {
-    schemaVersion = 2;
+    schemaVersion = 3;
     preset = static_cast<QualityPreset>(
         std::clamp(static_cast<int>(preset), 0, 4));
     frameGenMode = static_cast<FrameGenMode>(
@@ -313,6 +341,9 @@ void FrameGenConfig::normalize() noexcept {
     if (targetFps != 0) {
         targetFps = std::clamp(targetFps, 30, 240);
     }
+
+    hudOptimizerMode = static_cast<HudOptimizerMode>(
+        std::clamp(static_cast<int>(hudOptimizerMode), 0, 2));
 
     hudStyle = static_cast<HudStyle>(
         std::clamp(static_cast<int>(hudStyle), 0, 2));
@@ -526,6 +557,36 @@ ConfigApplyResult applyConfigKeyValue(FrameGenConfig &config,
         return ConfigApplyResult::UpdatedConfig;
     }
 
+    if (key == keys::kHudOptimizerMode) {
+        config.hudOptimizerMode =
+            parseHudOptimizerModeValue(value, config.hudOptimizerMode);
+        config.normalize();
+        return ConfigApplyResult::UpdatedConfig;
+    }
+
+    if (key == keys::kHudLatencyFlush) {
+        config.hudLatencyFlush = parseBoolValue(value, config.hudLatencyFlush);
+        config.normalize();
+        return ConfigApplyResult::UpdatedConfig;
+    }
+
+    if (key == keys::kHudStaticScreenBoost) {
+        config.hudStaticScreenBoost =
+            parseBoolValue(value, config.hudStaticScreenBoost);
+        config.normalize();
+        return ConfigApplyResult::UpdatedConfig;
+    }
+
+    if (key == keys::kClearScreenOverlays) {
+        config.clearScreenOverlays =
+            parseBoolValue(value, config.clearScreenOverlays);
+        if (config.clearScreenOverlays) {
+            config.showHud = false;
+        }
+        config.normalize();
+        return ConfigApplyResult::UpdatedConfig;
+    }
+
     if (key == keys::kShowHud) {
         config.showHud = parseBoolValue(value, config.showHud);
         config.normalize();
@@ -623,8 +684,25 @@ void appendV1ModuleConfigs(pl::modmenu::ModuleBuilder &builder,
                 "Frame Pacer Target FPS (0=Unlimited)",
                 pl::modmenu::ConfigType::SliderInt,
                 std::to_string(config.targetFps), "0", "240")
+        .config(keys::kHudOptimizerMode,
+                "HUD Optimizer (0=Off, 1=Balanced, 2=Ultra Low-Latency)",
+                pl::modmenu::ConfigType::SliderInt,
+                std::to_string(static_cast<int>(config.hudOptimizerMode)), "0",
+                "2")
+        .config(keys::kHudLatencyFlush,
+                "HUD Optimizer: Low-Latency GPU Flush",
+                pl::modmenu::ConfigType::Toggle,
+                config.hudLatencyFlush ? "true" : "false")
+        .config(keys::kHudStaticScreenBoost,
+                "HUD Optimizer: Inventory & UI Screen Boost",
+                pl::modmenu::ConfigType::Toggle,
+                config.hudStaticScreenBoost ? "true" : "false")
+        .config(keys::kClearScreenOverlays,
+                "HUD Optimizer: Remove All Screen Overlays",
+                pl::modmenu::ConfigType::Toggle,
+                config.clearScreenOverlays ? "true" : "false")
         .config(keys::kShowHud,
-                "Show In-Game Telemetry HUD",
+                "Show Optional Telemetry Badge",
                 pl::modmenu::ConfigType::Toggle,
                 config.showHud ? "true" : "false")
         .config(keys::kHudStyle,
@@ -684,6 +762,9 @@ std::string buildV2ConfigSchemaJson(const FrameGenConfig &config,
     const std::vector<ConfigConditionV2> camEnabledCond = {
         {keys::kCameraSmoothingMode, ConfigConditionOpV2::NotEquals, "0"}
     };
+    const std::vector<ConfigConditionV2> hudOptEnabledCond = {
+        {keys::kHudOptimizerMode, ConfigConditionOpV2::NotEquals, "0"}
+    };
     const std::vector<ConfigConditionV2> hudEnabledCond = {
         {keys::kShowHud, ConfigConditionOpV2::Truthy, "true"}
     };
@@ -693,11 +774,11 @@ std::string buildV2ConfigSchemaJson(const FrameGenConfig &config,
         .category("general", "Presets & Multiplier",
                   "Quick profiles, 2x/3x/4x frame multiplier, and live telemetry.")
         .category("framegen", "Frame Generation",
-                  "Motion-compensated GPU frame synthesis and interpolation.")
+                  "Multi-rate sub-frame synthesis and FPS multiplication.")
         .category("camera", "Camera Smoothing",
                   "Sub-frame camera smoothing with 100% angle conservation.")
-        .category("pacing", "Pacing & HUD",
-                  "Frame pacing, Smart Auto-Tune, and draggable HUD overlay.");
+        .category("pacing", "HUD Optimizer & Pacing",
+                  "HUD latency optimizer, UI screen boost, and frame pacing.");
 
     // --- Category: general ---
     {
@@ -963,7 +1044,48 @@ std::string buildV2ConfigSchemaJson(const FrameGenConfig &config,
               "Automatically steadies camera smoothing when zoomed in.",
               config.fovScaling, true, camEnabledCond, camEnabledCond);
 
-    // --- Category: pacing & HUD ---
+    // --- Category: pacing & HUD Optimizer ---
+    {
+        ConfigNodeV2 hudOptNode{};
+        hudOptNode.id = keys::kHudOptimizerMode;
+        hudOptNode.key = keys::kHudOptimizerMode;
+        hudOptNode.category = "pacing";
+        hudOptNode.section = "HUD Optimizer";
+        hudOptNode.title = "HUD Optimizer Mode";
+        hudOptNode.description =
+            "Eliminates HUD/crosshair input lag, skips redundant UI canvas "
+            "redraws, and boosts inventory/chest screen responsiveness.";
+        hudOptNode.type = ConfigControlTypeV2::Choice;
+        hudOptNode.choiceStyle = ConfigChoiceStyleV2::Segmented;
+        hudOptNode.defaultValue = "2";
+        hudOptNode.currentValue =
+            std::to_string(static_cast<int>(config.hudOptimizerMode));
+        hudOptNode.hasCurrentValue = true;
+        hudOptNode.options = {
+            {"0", "Off", "Standard HUD rendering", "", false, "", false},
+            {"1", "Balanced", "Flushes HUD latency during active movement", "", false, "", false},
+            {"2", "Ultra Low-Latency", "Maximum HUD & inventory responsiveness (Recommended)", "", false, "", false},
+        };
+        schema.node(std::move(hudOptNode));
+    }
+
+    addToggle(keys::kHudLatencyFlush, "pacing", "HUD Optimizer",
+              "HUD Pre-Swap Latency Flush",
+              "Flushes GPU command queue before swap so crosshair and hotbar "
+              "respond with zero buffered frame delay.",
+              config.hudLatencyFlush, true, hudOptEnabledCond,
+              hudOptEnabledCond);
+    addToggle(keys::kHudStaticScreenBoost, "pacing", "HUD Optimizer",
+              "Inventory & GUI Fast-Response Boost",
+              "Optimizes frame pacing when inventory, chest, or pause menus "
+              "are open.",
+              config.hudStaticScreenBoost, true, hudOptEnabledCond,
+              hudOptEnabledCond);
+    addToggle(keys::kClearScreenOverlays, "pacing", "HUD Optimizer",
+              "Remove Center-Screen Overlays & Logos",
+              "Keeps the screen 100% clean with zero floating logos or boxes.",
+              config.clearScreenOverlays, true, {}, {});
+
     addToggle(keys::kAutoTune, "pacing", "Frame Pacing",
               "Smart Auto-Tune Budget Guard",
               "Adapts synthesis workload if GPU frame times spike.",
@@ -972,10 +1094,10 @@ std::string buildV2ConfigSchemaJson(const FrameGenConfig &config,
                  "Frame Pacer Target FPS (0 = Unlimited)",
                  "Set to 0 for native VSync, or set a custom FPS target.",
                  config.targetFps, 0, 0, 240, 5, "FPS", {}, {});
-    addToggle(keys::kShowHud, "pacing", "HUD Overlay",
-              "Show In-Game Telemetry HUD",
-              "Displays live FPS, Effective FPS, Jitter, and Camera status.",
-              config.showHud, true, {}, {});
+    addToggle(keys::kShowHud, "pacing", "Optional Telemetry Badge",
+              "Show Telemetry Badge (Top-Left)",
+              "Off by default so the screen stays completely clean.",
+              config.showHud, false, {}, {});
 
     {
         ConfigNodeV2 styleNode{};
@@ -1048,6 +1170,9 @@ bool loadConfigFromFile(const std::filesystem::path &path,
         }
     };
 
+    int fileSchemaVersion = 1;
+    getInt("schema_version", fileSchemaVersion);
+
     int presetInt = static_cast<int>(outConfig.preset);
     getInt(keys::kPreset, presetInt);
     outConfig.preset = static_cast<QualityPreset>(presetInt);
@@ -1075,6 +1200,13 @@ bool loadConfigFromFile(const std::filesystem::path &path,
     getBool(keys::kAutoTune, outConfig.autoTune);
     getInt(keys::kTargetFps, outConfig.targetFps);
 
+    int hudOptInt = static_cast<int>(outConfig.hudOptimizerMode);
+    getInt(keys::kHudOptimizerMode, hudOptInt);
+    outConfig.hudOptimizerMode = static_cast<HudOptimizerMode>(hudOptInt);
+    getBool(keys::kHudLatencyFlush, outConfig.hudLatencyFlush);
+    getBool(keys::kHudStaticScreenBoost, outConfig.hudStaticScreenBoost);
+    getBool(keys::kClearScreenOverlays, outConfig.clearScreenOverlays);
+
     getBool(keys::kShowHud, outConfig.showHud);
     int hudStyleInt = static_cast<int>(outConfig.hudStyle);
     getInt(keys::kHudStyle, hudStyleInt);
@@ -1083,6 +1215,14 @@ bool loadConfigFromFile(const std::filesystem::path &path,
     getInt(keys::kHudOpacity, outConfig.hudOpacity);
     getFloat(keys::kHudPosX, outConfig.hudPosX);
     getFloat(keys::kHudPosY, outConfig.hudPosY);
+
+    // Automatically migrate pre-v3 configs to clear any old on-screen HUD/logo
+    if (fileSchemaVersion < 3) {
+        outConfig.showHud = false;
+        outConfig.clearScreenOverlays = true;
+        outConfig.hudPosX = 16.0f;
+        outConfig.hudPosY = 16.0f;
+    }
 
     outConfig.normalize();
     return true;
@@ -1124,6 +1264,10 @@ bool saveConfigToFile(const std::filesystem::path &path,
         << "  \"" << keys::kFovScaling << "\": " << (c.fovScaling ? "true" : "false") << ",\n"
         << "  \"" << keys::kAutoTune << "\": " << (c.autoTune ? "true" : "false") << ",\n"
         << "  \"" << keys::kTargetFps << "\": " << c.targetFps << ",\n"
+        << "  \"" << keys::kHudOptimizerMode << "\": " << static_cast<int>(c.hudOptimizerMode) << ",\n"
+        << "  \"" << keys::kHudLatencyFlush << "\": " << (c.hudLatencyFlush ? "true" : "false") << ",\n"
+        << "  \"" << keys::kHudStaticScreenBoost << "\": " << (c.hudStaticScreenBoost ? "true" : "false") << ",\n"
+        << "  \"" << keys::kClearScreenOverlays << "\": " << (c.clearScreenOverlays ? "true" : "false") << ",\n"
         << "  \"" << keys::kShowHud << "\": " << (c.showHud ? "true" : "false") << ",\n"
         << "  \"" << keys::kHudStyle << "\": " << static_cast<int>(c.hudStyle) << ",\n"
         << "  \"" << keys::kHudOpacity << "\": " << c.hudOpacity << ",\n"

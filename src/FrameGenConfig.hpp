@@ -13,7 +13,7 @@ inline constexpr const char *kModId = "leviframegen";
 inline constexpr const char *kModuleId = "leviframegen.module";
 inline constexpr const char *kHudElementId = "leviframegen.hud_card";
 inline constexpr const char *kModName = "LeviFrameGen";
-inline constexpr const char *kModVersion = "2.1.0";
+inline constexpr const char *kModVersion = "2.2.0";
 inline constexpr const char *kModAuthor = "ballrightmohab-png";
 
 // Configuration keys exposed to LeviLauncher Mod Menu (V1 & V2)
@@ -35,6 +35,11 @@ inline constexpr const char *kFovScaling = "fov_scaling";
 
 inline constexpr const char *kAutoTune = "auto_tune";
 inline constexpr const char *kTargetFps = "target_fps";
+
+inline constexpr const char *kHudOptimizerMode = "hud_optimizer_mode";
+inline constexpr const char *kHudLatencyFlush = "hud_latency_flush";
+inline constexpr const char *kHudStaticScreenBoost = "hud_static_screen_boost";
+inline constexpr const char *kClearScreenOverlays = "clear_screen_overlays";
 
 inline constexpr const char *kShowHud = "show_hud";
 inline constexpr const char *kHudStyle = "hud_style";
@@ -75,6 +80,12 @@ enum class HudStyle : int {
     Minimal = 2
 };
 
+enum class HudOptimizerMode : int {
+    Off = 0,
+    Balanced = 1,
+    UltraLowLatency = 2
+};
+
 struct RuntimeTelemetrySnapshot {
     bool moduleEnabled = true;
     bool eglHooked = false;
@@ -104,7 +115,7 @@ struct RuntimeTelemetrySnapshot {
 };
 
 struct FrameGenConfig {
-    int schemaVersion = 2;
+    int schemaVersion = 3;
 
     QualityPreset preset = QualityPreset::Balanced;
 
@@ -128,10 +139,16 @@ struct FrameGenConfig {
     bool autoTune = true;
     int targetFps = 0;                   // 0 = Unlimited, or 30 .. 240
 
-    // HUD & UI settings
-    bool showHud = true;
-    HudStyle hudStyle = HudStyle::Detailed;
-    int hudOpacity = 85;                 // 20 .. 100
+    // HUD Optimizer settings
+    HudOptimizerMode hudOptimizerMode = HudOptimizerMode::UltraLowLatency;
+    bool hudLatencyFlush = true;
+    bool hudStaticScreenBoost = true;
+    bool clearScreenOverlays = true;
+
+    // Optional Telemetry HUD (OFF by default so screen stays 100% clean)
+    bool showHud = false;
+    HudStyle hudStyle = HudStyle::Minimal;
+    int hudOpacity = 75;                 // 20 .. 100
     float hudPosX = 16.0f;
     float hudPosY = 16.0f;
 
@@ -143,6 +160,7 @@ const char *presetName(QualityPreset preset) noexcept;
 const char *frameGenModeName(FrameGenMode mode) noexcept;
 const char *cameraSmoothingModeName(CameraSmoothingMode mode) noexcept;
 const char *hudStyleName(HudStyle style) noexcept;
+const char *hudOptimizerModeName(HudOptimizerMode mode) noexcept;
 
 enum class ConfigApplyResult {
     Unchanged = 0,

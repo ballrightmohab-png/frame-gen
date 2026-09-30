@@ -131,6 +131,7 @@ void glVertexAttribPointer(GLuint index, GLint size, GLenum type,
                            GLboolean normalized, GLsizei stride,
                            const void *pointer);
 void glDrawArrays(GLenum mode, GLint first, GLsizei count);
+void glFlush(void);
 
 #ifdef __cplusplus
 }

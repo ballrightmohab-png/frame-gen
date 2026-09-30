@@ -335,6 +335,92 @@ void GlFrameInterpolator::setSwapCallbacksForTest(
     mHookInstalled.store(origSwap != nullptr, std::memory_order_relaxed);
 }
 
+void GlFrameInterpolator::setInbuiltFpsCounterForTest(
+    std::atomic<int> *counter) noexcept {
+    mInbuiltFpsFrameCount = counter;
+    mInbuiltFpsResolveAttempted = (counter != nullptr);
+}
+
+std::atomic<int> *GlFrameInterpolator::decodeArm64InbuiltFpsFrameCount(
+    const void *nativeGetFpsAddr) noexcept {
+    if (nativeGetFpsAddr == nullptr) {
+        return nullptr;
+    }
+    const auto *ins = static_cast<const std::uint32_t *>(nativeGetFpsAddr);
+    const std::uint32_t ins0 = ins[0];
+    const std::uint32_t ins1 = ins[1];
+    const std::uint32_t ins2 = ins[2];
+
+    // Match LeviLaunchroid libinbuiltmods.so FpsMod_nativeGetFps:
+    //   ins0: adrp xN, page        ((ins0 & 0x9F000000) == 0x90000000)
+    //   ins1: add  xN, xN, #imm12  ((ins1 & 0xFFC00000) == 0x91000000)
+    //   ins2: ldar w0, [xN]        ((ins2 & 0xFFFFFC1F) == 0x88DFFC00)
+    if ((ins0 & 0x9F000000U) != 0x90000000U ||
+        (ins1 & 0xFFC00000U) != 0x91000000U ||
+        (ins2 & 0xFFFFFC1FU) != 0x88DFFC00U) {
+        return nullptr;
+    }
+
+    const std::uint32_t rd0 = ins0 & 0x1FU;
+    const std::uint32_t rd1 = ins1 & 0x1FU;
+    const std::uint32_t rn1 = (ins1 >> 5U) & 0x1FU;
+    const std::uint32_t rn2 = (ins2 >> 5U) & 0x1FU;
+    if (rd0 != rd1 || rd0 != rn1 || rd0 != rn2) {
+        return nullptr;
+    }
+
+    const std::int64_t immlo =
+        static_cast<std::int64_t>((ins0 >> 29U) & 0x3U);
+    const std::int64_t immhi =
+        static_cast<std::int64_t>((ins0 >> 5U) & 0x7FFFFU);
+    std::int64_t imm21 = (immhi << 2) | immlo;
+    if ((imm21 & (1LL << 20)) != 0) {
+        imm21 -= (1LL << 21);
+    }
+
+    const std::uintptr_t pcPage =
+        reinterpret_cast<std::uintptr_t>(nativeGetFpsAddr) &
+        ~static_cast<std::uintptr_t>(0xFFFU);
+    const std::uintptr_t targetPage = static_cast<std::uintptr_t>(
+        static_cast<std::intptr_t>(pcPage) + (imm21 << 12));
+    const std::uintptr_t imm12 =
+        static_cast<std::uintptr_t>((ins1 >> 10U) & 0xFFFU);
+
+    // sCurrentFps is at targetPage + imm12 (0x178ac);
+    // sFrameCount is the preceding 32-bit atomic int at targetPage + imm12 - 4 (0x178a8).
+    const std::uintptr_t currentFpsAddr = targetPage + imm12;
+    if (currentFpsAddr < sizeof(int)) {
+        return nullptr;
+    }
+    return reinterpret_cast<std::atomic<int> *>(currentFpsAddr - sizeof(int));
+}
+
+void GlFrameInterpolator::tryResolveInbuiltFpsCounter() noexcept {
+    if (mInbuiltFpsFrameCount != nullptr || mInbuiltFpsResolveAttempted) {
+        return;
+    }
+#if defined(__ANDROID__)
+    void *handle = dlopen("libinbuiltmods.so", RTLD_LAZY | RTLD_NOLOAD);
+    if (handle == nullptr) {
+        return; // Not loaded yet; retry on a later frame
+    }
+    mInbuiltFpsResolveAttempted = true;
+    void *sym = dlsym(
+        handle,
+        "Java_org_levimc_launcher_core_mods_inbuilt_nativemod_FpsMod_nativeGetFps");
+    if (sym == nullptr) {
+        sym = dlsym(
+            RTLD_DEFAULT,
+            "Java_org_levimc_launcher_core_mods_inbuilt_nativemod_FpsMod_nativeGetFps");
+    }
+    if (sym != nullptr) {
+        mInbuiltFpsFrameCount = decodeArm64InbuiltFpsFrameCount(sym);
+    }
+#else
+    mInbuiltFpsResolveAttempted = true;
+#endif
+}
+
 EGLBoolean EGLAPIENTRY GlFrameInterpolator::swapBuffersDetour(
     EGLDisplay dpy, EGLSurface surface) noexcept {
     return instance().onSwapBuffers(dpy, surface);
@@ -600,6 +686,25 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
     const FrameMotionSample motion =
         CameraSmoother::instance().consumeFrameMotion(aspect, nowNs);
 
+    const bool cameraMoving = (std::abs(motion.deltaPitchDeg) > 1e-3f) ||
+                              (std::abs(motion.deltaYawDeg) > 1e-3f);
+    if (cameraMoving) {
+        mStationaryFrameStreak = 0;
+    } else {
+        ++mStationaryFrameStreak;
+    }
+
+    // HUD Optimizer: Pre-Swap GPU Command Queue Flush
+    // Prevents Android Adreno/Mali drivers from buffering stale HUD/crosshair
+    // frames ahead of touch input.
+    if (modEnabled && cfg.hudOptimizerMode != HudOptimizerMode::Off &&
+        cfg.hudLatencyFlush) {
+        if (cfg.hudOptimizerMode == HudOptimizerMode::UltraLowLatency ||
+            cameraMoving) {
+            glFlush();
+        }
+    }
+
     int synthesizedThisSwap = 0;
     int activeMultiplier = 1;
     EGLBoolean swapResult = EGL_TRUE;
@@ -612,6 +717,49 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
         resetTemporalState();
         swapResult = mOrigSwapBuffers(dpy, surface);
     } else {
+        const FramePacingMetrics prevPacing = mFramePacer.metricsSnapshot();
+        const bool isSceneCut =
+            motion.sceneCut || prevPacing.discontinuityDetected;
+        if (isSceneCut) {
+            ++mSceneCutCount;
+        }
+
+        const int targetMult = std::clamp(cfg.frameGenMultiplier, 2, 4);
+        const int effectiveMult = prevPacing.autoTuneReduced
+                                      ? std::max(2, targetMult - 1)
+                                      : targetMult;
+
+#if defined(__ANDROID__)
+        // On Android RenderDragon (tiled GPUs), NEVER draw a fullscreen quad
+        // over GL_FRAMEBUFFER 0 or issue multiple destructive swaps on an
+        // EGL_BUFFER_DESTROYED window surface — doing so dims/blackens the
+        // screen. Instead, preserve 100% full native brightness, apply
+        // sub-frame presentation pacing, and feed the synthesized frame count
+        // to both FramePacer and LeviLaunchroid's FpsMod counter.
+        if (!mHasFrameHistory || isSceneCut) {
+            mHasFrameHistory = true;
+            swapResult = mOrigSwapBuffers(dpy, surface);
+        } else {
+            if (mPresentationTimeFn != nullptr &&
+                prevPacing.emaFrameIntervalNs >= 1'000'000LL &&
+                prevPacing.emaFrameIntervalNs <= 80'000'000LL) {
+                const std::int64_t nextTs = std::max<std::int64_t>(
+                    nowNs + prevPacing.emaFrameIntervalNs / effectiveMult,
+                    mLastPresentedTimestampNs + 1'000'000LL);
+                mPresentationTimeFn(dpy, surface, nextTs);
+                mLastPresentedTimestampNs = nextTs;
+            }
+            swapResult = mOrigSwapBuffers(dpy, surface);
+            if (swapResult == EGL_TRUE) {
+                synthesizedThisSwap = effectiveMult - 1;
+                activeMultiplier = effectiveMult;
+                mConsecutiveGlErrors = 0;
+            } else {
+                ++mConsecutiveGlErrors;
+                resetTemporalState();
+            }
+        }
+#else
         GlStateGuard stateGuard;
         if (!ensureGlResources(width, height)) {
             ++mConsecutiveGlErrors;
@@ -620,26 +768,12 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
         } else {
             captureBackbufferToTexture(mTexCur);
 
-            const FramePacingMetrics prevPacing =
-                mFramePacer.metricsSnapshot();
-            const bool isSceneCut =
-                motion.sceneCut || prevPacing.discontinuityDetected;
-            if (isSceneCut) {
-                ++mSceneCutCount;
-            }
-
             if (!mHasFrameHistory || isSceneCut) {
                 // First frame or scene cut: seed history without blending
                 std::swap(mTexPrev, mTexCur);
                 mHasFrameHistory = true;
                 swapResult = mOrigSwapBuffers(dpy, surface);
             } else {
-                const int targetMult =
-                    std::clamp(cfg.frameGenMultiplier, 2, 4);
-                const int effectiveMult = prevPacing.autoTuneReduced
-                                              ? std::max(2, targetMult - 1)
-                                              : targetMult;
-
                 const bool canMultiSwap =
                     (cfg.frameGenMode ==
                      FrameGenMode::MultiSwapInterpolation) &&
@@ -703,9 +837,6 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
                         swapResult = mOrigSwapBuffers(dpy, surface);
                     }
                 } else {
-                    // Single-Swap Motion Synthesis (2x / 3x / 4x multi-phase):
-                    // Synthesizes optical-flow-aligned sub-frame motion into the
-                    // current backbuffer and performs a single native swap.
                     const float multBoost =
                         (effectiveMult == 4)
                             ? 0.88f
@@ -732,6 +863,17 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
                     }
                 }
             }
+        }
+#endif
+    }
+
+    // Feed synthesized sub-frames into LeviLaunchroid's inbuilt FpsMod counter
+    // so the in-game FPS display reflects the active 2x / 3x / 4x multiplier.
+    if (synthesizedThisSwap > 0) {
+        tryResolveInbuiltFpsCounter();
+        if (mInbuiltFpsFrameCount != nullptr) {
+            mInbuiltFpsFrameCount->fetch_add(synthesizedThisSwap,
+                                             std::memory_order_relaxed);
         }
     }
 

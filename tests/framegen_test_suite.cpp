@@ -60,6 +60,7 @@ struct GlMachineState {
 
     int drawArraysCount = 0;
     int copyTexSubImageCount = 0;
+    int flushCount = 0;
     float lastUniformMvU = 0.0f;
     float lastUniformMvV = 0.0f;
     float lastUniformPhase = 0.0f;
@@ -407,6 +408,7 @@ void glVertexAttribPointer(GLuint, GLint, GLenum, GLboolean, GLsizei,
 void glDrawArrays(GLenum, GLint, GLsizei) {
     ++mock_runtime::gGl.drawArraysCount;
 }
+void glFlush(void) { ++mock_runtime::gGl.flushCount; }
 
 } // extern "C"
 
@@ -702,31 +704,58 @@ void testGlFrameInterpolatorAndStateGuard() {
     interp.updateConfig(cfg);
     interp.setModuleEnabled(true);
 
+    // Verify ARM64 FpsMod_nativeGetFps instruction decoder & 2x/3x/4x FPS counter injection
+    // Construct a page-aligned fake function + .bss layout matching libinbuiltmods.so:
+    //   ins0: adrp x8, #0 (same page) -> 0x90000008
+    //   ins1: add  x8, x8, #0x24      -> 0x91009108
+    //   ins2: ldar w0, [x8]           -> 0x88dffd00
+    //   ins3: ret                     -> 0xd65f03c0
+    alignas(4096) std::uint32_t fakePage[64]{};
+    fakePage[0] = 0x90000008U;
+    fakePage[1] = 0x91009108U;
+    fakePage[2] = 0x88DFFD00U;
+    fakePage[3] = 0xD65F03C0U;
+    auto *decodedFrameCount =
+        GlFrameInterpolator::decodeArm64InbuiltFpsFrameCount(fakePage);
+    assert(decodedFrameCount ==
+           reinterpret_cast<std::atomic<int> *>(&fakePage[8]));
+
+    std::atomic<int> mockFpsModFrameCount{0};
+    interp.setInbuiltFpsCounterForTest(&mockFpsModFrameCount);
+
     // Frame 1 (seeds history, 1 swap)
     interp.onSwapBuffers(reinterpret_cast<EGLDisplay>(1),
                          reinterpret_cast<EGLSurface>(1));
     assert(mock_runtime::gOrigSwapCallCount == 1);
+    assert(mock_runtime::gGl.flushCount >= 1 &&
+           "HUD Optimizer UltraLowLatency must flush GPU queue pre-swap");
 
-    // Frame 2 (synthesizes motion in Single-Swap mode: still 1 swap per game frame!)
+    // Frame 2 (2x mode: adds +1 synthesized frame to FpsMod counter -> 1 real + 1 synth = 2x FPS)
+    mockFpsModFrameCount.store(0);
     interp.onSwapBuffers(reinterpret_cast<EGLDisplay>(1),
                          reinterpret_cast<EGLSurface>(1));
     assert(mock_runtime::gOrigSwapCallCount == 2);
     assert(mock_runtime::gGl.drawArraysCount == 1);
     assert(interp.telemetrySnapshot().activeMultiplier == 2);
+    assert(mockFpsModFrameCount.load() == 1);
 
-    // Verify 3x and 4x Single-Swap multipliers
+    // Verify 3x and 4x Single-Swap multipliers and FpsMod counter injection (+2 and +3)
     cfg.frameGenMultiplier = 3;
     cfg.autoTune = false;
     interp.updateConfig(cfg);
+    mockFpsModFrameCount.store(0);
     interp.onSwapBuffers(reinterpret_cast<EGLDisplay>(1),
                          reinterpret_cast<EGLSurface>(1));
     assert(interp.telemetrySnapshot().activeMultiplier == 3);
+    assert(mockFpsModFrameCount.load() == 2);
 
     cfg.frameGenMultiplier = 4;
     interp.updateConfig(cfg);
+    mockFpsModFrameCount.store(0);
     interp.onSwapBuffers(reinterpret_cast<EGLDisplay>(1),
                          reinterpret_cast<EGLSurface>(1));
     assert(interp.telemetrySnapshot().activeMultiplier == 4);
+    assert(mockFpsModFrameCount.load() == 3);
 
     // Verify 100% of Minecraft's GL state was restored by GlStateGuard
     assert(mock_runtime::gGl.currentProgram == 77);
@@ -799,13 +828,17 @@ void testModLifecycleAndModMenuIntegration() {
     assert(reg->load(reg->instance, ctx));
     assert(reg->enable(reg->instance, ctx));
     assert(mock_runtime::gModuleRegistered);
+    assert(mock_runtime::gLastRegisteredModule.hideInHudEditor &&
+           "Module must set hideInHudEditor=true so no center-screen box appears");
     assert(!mock_runtime::gButtonRegistered &&
            "Must NOT register a floating logo button in the middle of the screen");
     assert(!mock_runtime::gLastSchemaJson.empty());
-    assert(!mock_runtime::gLastDrawCommands.empty());
-    assert(mock_runtime::gLastHudElements.size() == 1);
+    assert(mock_runtime::gLastDrawCommands.empty() &&
+           "Screen must be 100% free of overlay draw commands by default");
+    assert(mock_runtime::gLastHudElements.empty() &&
+           "Screen must be 100% free of HUD editor boxes by default");
 
-    // Verify V2 schema contains categories, 2x/3x/4x multiplier options, and telemetry
+    // Verify V2 schema contains categories, 2x/3x/4x multiplier options, HUD Optimizer, and telemetry
     assert(mock_runtime::gLastSchemaJson.find("\"version\":2") !=
            std::string::npos);
     assert(mock_runtime::gLastSchemaJson.find("\"categories\":[") !=
@@ -815,6 +848,8 @@ void testModLifecycleAndModMenuIntegration() {
     assert(mock_runtime::gLastSchemaJson.find("2×") != std::string::npos);
     assert(mock_runtime::gLastSchemaJson.find("3×") != std::string::npos);
     assert(mock_runtime::gLastSchemaJson.find("4×") != std::string::npos);
+    assert(mock_runtime::gLastSchemaJson.find("hud_optimizer_mode") !=
+           std::string::npos);
     assert(mock_runtime::gLastSchemaJson.find("fps_telemetry") !=
            std::string::npos);
 

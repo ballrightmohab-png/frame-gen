@@ -86,10 +86,14 @@ public:
     void setSwapCallbacksForTest(
         EglSwapBuffersFn origSwap,
         EglPresentationTimeFn presentationTimeFn = nullptr) noexcept;
+    void setInbuiltFpsCounterForTest(std::atomic<int> *counter) noexcept;
+    [[nodiscard]] static std::atomic<int> *decodeArm64InbuiltFpsFrameCount(
+        const void *nativeGetFpsAddr) noexcept;
 
 private:
     GlFrameInterpolator() = default;
 
+    void tryResolveInbuiltFpsCounter() noexcept;
     bool ensureGlResources(GLsizei width, GLsizei height) noexcept;
     void destroyGlResources() noexcept;
     bool compileSynthesisProgram() noexcept;
@@ -139,6 +143,10 @@ private:
     std::int64_t mLastPresentedTimestampNs = 0;
     std::uint64_t mSceneCutCount = 0;
     std::uint32_t mConsecutiveGlErrors = 0;
+    std::uint32_t mStationaryFrameStreak = 0;
+
+    std::atomic<int> *mInbuiltFpsFrameCount = nullptr;
+    bool mInbuiltFpsResolveAttempted = false;
 };
 
 } // namespace framegen
