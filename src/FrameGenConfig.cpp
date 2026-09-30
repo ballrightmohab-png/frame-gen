@@ -62,6 +62,19 @@ std::string formatFloat(float value, int decimals = 2) {
     return std::string(buf);
 }
 
+int parseMultiplierValue(std::string_view text, int fallback) noexcept {
+    if (text == "2" || text == "2x" || text == "2X" || text == "2×") {
+        return 2;
+    }
+    if (text == "3" || text == "3x" || text == "3X" || text == "3×") {
+        return 3;
+    }
+    if (text == "4" || text == "4x" || text == "4X" || text == "4×") {
+        return 4;
+    }
+    return std::clamp(parseIntValue(text, fallback), 2, 4);
+}
+
 QualityPreset parsePresetValue(std::string_view text,
                                QualityPreset fallback) noexcept {
     if (text == "Power Saver" || text == "power_saver") {
@@ -347,7 +360,7 @@ void FrameGenConfig::applyPreset(QualityPreset newPreset) noexcept {
 
     case QualityPreset::Smooth:
         frameGenMode = FrameGenMode::SingleSwapSynthesis;
-        frameGenMultiplier = 2;
+        frameGenMultiplier = 3;
         blendStrength = 0.78f;
         motionScale = 1.05f;
         hudProtection = 0.86f;
@@ -363,7 +376,7 @@ void FrameGenConfig::applyPreset(QualityPreset newPreset) noexcept {
 
     case QualityPreset::Ultra:
         frameGenMode = FrameGenMode::MultiSwapInterpolation;
-        frameGenMultiplier = 2;
+        frameGenMultiplier = 4;
         blendStrength = 0.82f;
         motionScale = 1.10f;
         hudProtection = 0.85f;
@@ -422,7 +435,7 @@ ConfigApplyResult applyConfigKeyValue(FrameGenConfig &config,
 
     if (key == keys::kFrameGenMultiplier) {
         config.frameGenMultiplier =
-            parseIntValue(value, config.frameGenMultiplier);
+            parseMultiplierValue(value, config.frameGenMultiplier);
         config.preset = QualityPreset::Custom;
         config.normalize();
         return ConfigApplyResult::UpdatedConfig;
@@ -543,12 +556,6 @@ ConfigApplyResult applyConfigKeyValue(FrameGenConfig &config,
         return ConfigApplyResult::UpdatedConfig;
     }
 
-    if (key == keys::kShowQuickButton) {
-        config.showQuickButton = parseBoolValue(value, config.showQuickButton);
-        config.normalize();
-        return ConfigApplyResult::UpdatedConfig;
-    }
-
     return ConfigApplyResult::Unchanged;
 }
 
@@ -559,14 +566,14 @@ void appendV1ModuleConfigs(pl::modmenu::ModuleBuilder &builder,
                 "Preset (0=PowerSaver, 1=Balanced, 2=Smooth, 3=Ultra, 4=Custom)",
                 pl::modmenu::ConfigType::SliderInt,
                 std::to_string(static_cast<int>(config.preset)), "0", "4")
+        .config(keys::kFrameGenMultiplier,
+                "Rendered Frames Multiplier (2x / 3x / 4x Max)",
+                pl::modmenu::ConfigType::SliderInt,
+                std::to_string(config.frameGenMultiplier), "2", "4")
         .config(keys::kFrameGenMode,
                 "FrameGen Mode (0=Off, 1=Single-Swap Synthesis, 2=Multi-Swap)",
                 pl::modmenu::ConfigType::SliderInt,
                 std::to_string(static_cast<int>(config.frameGenMode)), "0", "2")
-        .config(keys::kFrameGenMultiplier,
-                "Frame Multiplier (2x - 4x)",
-                pl::modmenu::ConfigType::SliderInt,
-                std::to_string(config.frameGenMultiplier), "2", "4")
         .config(keys::kBlendStrength,
                 "Temporal Synthesis Strength",
                 pl::modmenu::ConfigType::SliderFloat,
@@ -674,9 +681,6 @@ std::string buildV2ConfigSchemaJson(const FrameGenConfig &config,
     const std::vector<ConfigConditionV2> fgEnabledCond = {
         {keys::kFrameGenMode, ConfigConditionOpV2::NotEquals, "0"}
     };
-    const std::vector<ConfigConditionV2> fgMultiSwapCond = {
-        {keys::kFrameGenMode, ConfigConditionOpV2::Equals, "2"}
-    };
     const std::vector<ConfigConditionV2> camEnabledCond = {
         {keys::kCameraSmoothingMode, ConfigConditionOpV2::NotEquals, "0"}
     };
@@ -686,8 +690,8 @@ std::string buildV2ConfigSchemaJson(const FrameGenConfig &config,
 
     ConfigSchemaBuilder schema;
     schema.defaultCategory("general")
-        .category("general", "Presets & Telemetry",
-                  "Quick profiles, live FPS/camera diagnostics, and actions.")
+        .category("general", "Presets & Multiplier",
+                  "Quick profiles, 2x/3x/4x frame multiplier, and live telemetry.")
         .category("framegen", "Frame Generation",
                   "Motion-compensated GPU frame synthesis and interpolation.")
         .category("camera", "Camera Smoothing",
@@ -712,13 +716,38 @@ std::string buildV2ConfigSchemaJson(const FrameGenConfig &config,
             std::to_string(static_cast<int>(config.preset));
         presetNode.hasCurrentValue = true;
         presetNode.options = {
-            {"0", "Power Saver", "Minimal GPU overhead, 60 FPS target", "", false, "", false},
-            {"1", "Balanced", "Recommended single-swap synthesis + Smart Camera", "", false, "", false},
-            {"2", "Smooth", "High-strength synthesis + silky camera filter", "", false, "", false},
-            {"3", "Ultra", "Multi-swap interpolation + ultra-fast response", "", false, "", false},
+            {"0", "Power Saver", "Minimal GPU overhead, 2x synthesis", "", false, "", false},
+            {"1", "Balanced", "Recommended 2x synthesis + Smart Camera", "", false, "", false},
+            {"2", "Smooth", "3x high-strength synthesis + silky camera filter", "", false, "", false},
+            {"3", "Ultra", "4x multi-swap interpolation + ultra-fast response", "", false, "", false},
             {"4", "Custom", "User-customized settings", "", false, "", false},
         };
         schema.node(std::move(presetNode));
+    }
+
+    {
+        ConfigNodeV2 multNode{};
+        multNode.id = keys::kFrameGenMultiplier;
+        multNode.key = keys::kFrameGenMultiplier;
+        multNode.category = "general";
+        multNode.section = "Frame Multiplier (2× / 3× / 4× Max)";
+        multNode.title = "Rendered Frame Multiplier";
+        multNode.description =
+            "Choose how many frames are generated per real game frame "
+            "(2× Double, 3× Triple, or 4× Quad Max).";
+        multNode.type = ConfigControlTypeV2::Choice;
+        multNode.choiceStyle = ConfigChoiceStyleV2::Segmented;
+        multNode.defaultValue = "2";
+        multNode.currentValue = std::to_string(config.frameGenMultiplier);
+        multNode.hasCurrentValue = true;
+        multNode.visibleWhen = fgEnabledCond;
+        multNode.enabledWhen = fgEnabledCond;
+        multNode.options = {
+            {"2", "2×", "Double FPS (1 generated frame per real frame)", "", false, "", false},
+            {"3", "3×", "Triple FPS (2 generated frames per real frame)", "", false, "", false},
+            {"4", "4×", "Quad FPS — Max (3 generated frames per real frame)", "", false, "", false},
+        };
+        schema.node(std::move(multNode));
     }
 
     auto addInfoNode = [&](const char *id, const char *title,
@@ -862,11 +891,6 @@ std::string buildV2ConfigSchemaJson(const FrameGenConfig &config,
         schema.node(std::move(n));
     };
 
-    addSliderInt(keys::kFrameGenMultiplier, "framegen", "Synthesis Tuning",
-                 "Target Frame Multiplier",
-                 "Number of total frames presented per native game frame.",
-                 config.frameGenMultiplier, 2, 2, 4, 1, "x", fgMultiSwapCond,
-                 fgEnabledCond);
     addSliderFloat(keys::kBlendStrength, "framegen", "Synthesis Tuning",
                    "Temporal Synthesis Strength",
                    "Controls optical-flow temporal synthesis weight.",
@@ -981,10 +1005,6 @@ std::string buildV2ConfigSchemaJson(const FrameGenConfig &config,
                  "HUD Card Opacity", "Background opacity of the HUD card.",
                  config.hudOpacity, 85, 20, 100, 5, "%", hudEnabledCond,
                  hudEnabledCond);
-    addToggle(keys::kShowQuickButton, "pacing", "HUD Overlay",
-              "Show Floating Quick-Preset Button",
-              "Displays an on-screen button to cycle presets in-game.",
-              config.showQuickButton, true, {}, {});
 
     return schema.toJson();
 }
@@ -1063,7 +1083,6 @@ bool loadConfigFromFile(const std::filesystem::path &path,
     getInt(keys::kHudOpacity, outConfig.hudOpacity);
     getFloat(keys::kHudPosX, outConfig.hudPosX);
     getFloat(keys::kHudPosY, outConfig.hudPosY);
-    getBool(keys::kShowQuickButton, outConfig.showQuickButton);
 
     outConfig.normalize();
     return true;
@@ -1109,8 +1128,7 @@ bool saveConfigToFile(const std::filesystem::path &path,
         << "  \"" << keys::kHudStyle << "\": " << static_cast<int>(c.hudStyle) << ",\n"
         << "  \"" << keys::kHudOpacity << "\": " << c.hudOpacity << ",\n"
         << "  \"" << keys::kHudPosX << "\": " << formatFloat(c.hudPosX, 2) << ",\n"
-        << "  \"" << keys::kHudPosY << "\": " << formatFloat(c.hudPosY, 2) << ",\n"
-        << "  \"" << keys::kShowQuickButton << "\": " << (c.showQuickButton ? "true" : "false") << "\n"
+        << "  \"" << keys::kHudPosY << "\": " << formatFloat(c.hudPosY, 2) << "\n"
         << "}\n";
 
     return out.good();

@@ -51,11 +51,19 @@ float luma(vec3 c) {
     return dot(c, vec3(0.299, 0.587, 0.114));
 }
 
+vec4 sampleWarpPhase(float p) {
+    vec2 uvPrev = clamp(vUV - p * uMotionVec, 0.0, 1.0);
+    vec2 uvCur  = clamp(vUV + (1.0 - p) * uMotionVec, 0.0, 1.0);
+    vec4 prevS  = texture2D(uPrevTex, uvPrev);
+    vec4 curS   = texture2D(uCurTex, uvCur);
+    return mix(prevS, curS, p);
+}
+
 void main() {
     vec4 curUnshifted = texture2D(uCurTex, vUV);
     vec4 prevUnshifted = texture2D(uPrevTex, vUV);
 
-    float phase = clamp(uPhase, 0.0, 1.0);
+    float phase = clamp(abs(uPhase), 0.0, 1.0);
     vec2 uvPrev = clamp(vUV - phase * uMotionVec, 0.0, 1.0);
     vec2 uvCur  = clamp(vUV + (1.0 - phase) * uMotionVec, 0.0, 1.0);
 
@@ -75,7 +83,20 @@ void main() {
     float edgeGuard = 1.0 - smoothstep(0.20, 0.58, motionDiff);
     float finalWeight = clamp(uBlendWeight * edgeGuard * (1.0 - hudMask), 0.0, 1.0);
 
-    vec4 synthesized = mix(prevShifted, curShifted, phase);
+    vec4 synthesized;
+    if (uPhase < -3.5) {
+        // 4x Single-Swap multi-phase optical-flow integration (t = 1/4, 2/4, 3/4)
+        synthesized = 0.22 * sampleWarpPhase(0.25) +
+                      0.33 * sampleWarpPhase(0.50) +
+                      0.45 * sampleWarpPhase(0.75);
+    } else if (uPhase < -2.5) {
+        // 3x Single-Swap multi-phase optical-flow integration (t = 1/3, 2/3)
+        synthesized = 0.42 * sampleWarpPhase(0.3333) +
+                      0.58 * sampleWarpPhase(0.6667);
+    } else {
+        // 2x Single-Swap or exact Multi-Swap sub-frame slice
+        synthesized = mix(prevShifted, curShifted, phase);
+    }
     gl_FragColor = mix(curUnshifted, synthesized, finalWeight);
 }
 )glsl";
@@ -613,17 +634,22 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
                 mHasFrameHistory = true;
                 swapResult = mOrigSwapBuffers(dpy, surface);
             } else {
+                const int targetMult =
+                    std::clamp(cfg.frameGenMultiplier, 2, 4);
+                const int effectiveMult = prevPacing.autoTuneReduced
+                                              ? std::max(2, targetMult - 1)
+                                              : targetMult;
+
                 const bool canMultiSwap =
                     (cfg.frameGenMode ==
                      FrameGenMode::MultiSwapInterpolation) &&
-                    (mPresentationTimeFn != nullptr) &&
                     !prevPacing.autoTuneReduced &&
                     (prevPacing.emaFrameIntervalNs >= 1'000'000LL) &&
                     (prevPacing.emaFrameIntervalNs <= 80'000'000LL);
 
                 if (canMultiSwap) {
                     const int extraFrames =
-                        std::clamp(cfg.frameGenMultiplier - 1, 1, 3);
+                        std::clamp(effectiveMult - 1, 1, 3);
                     const std::int64_t intervalNs =
                         prevPacing.emaFrameIntervalNs;
                     const std::int64_t baseNs = std::max<std::int64_t>(
@@ -637,7 +663,9 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
                         const std::int64_t synthTs =
                             baseNs + (intervalNs * i) / (extraFrames + 1);
 
-                        mPresentationTimeFn(dpy, surface, synthTs);
+                        if (mPresentationTimeFn != nullptr) {
+                            mPresentationTimeFn(dpy, surface, synthTs);
+                        }
                         drawSynthesizedQuad(motion.mvU, motion.mvV, phase,
                                             cfg.blendStrength,
                                             cfg.hudProtection);
@@ -653,7 +681,9 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
                         const std::int64_t finalTs = std::max<std::int64_t>(
                             baseNs + intervalNs,
                             mLastPresentedTimestampNs + 1'000'000LL);
-                        mPresentationTimeFn(dpy, surface, finalTs);
+                        if (mPresentationTimeFn != nullptr) {
+                            mPresentationTimeFn(dpy, surface, finalTs);
+                        }
                         drawSynthesizedQuad(motion.mvU, motion.mvV, 1.0f,
                                             cfg.blendStrength * 0.35f,
                                             cfg.hudProtection);
@@ -673,20 +703,28 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
                         swapResult = mOrigSwapBuffers(dpy, surface);
                     }
                 } else {
-                    // Single-Swap Motion Synthesis (default jitter-free path):
+                    // Single-Swap Motion Synthesis (2x / 3x / 4x multi-phase):
                     // Synthesizes optical-flow-aligned sub-frame motion into the
                     // current backbuffer and performs a single native swap.
+                    const float multBoost =
+                        (effectiveMult == 4)
+                            ? 0.88f
+                            : ((effectiveMult == 3) ? 0.80f : 0.72f);
                     const float effectiveBlend =
                         prevPacing.autoTuneReduced
                             ? (cfg.blendStrength * 0.45f)
-                            : (cfg.blendStrength * 0.72f);
-                    drawSynthesizedQuad(motion.mvU, motion.mvV, 0.5f,
+                            : (cfg.blendStrength * multBoost);
+                    const float encodedPhase =
+                        (effectiveMult >= 3)
+                            ? -static_cast<float>(effectiveMult)
+                            : 0.5f;
+                    drawSynthesizedQuad(motion.mvU, motion.mvV, encodedPhase,
                                         effectiveBlend, cfg.hudProtection);
                     swapResult = mOrigSwapBuffers(dpy, surface);
                     if (swapResult == EGL_TRUE) {
                         std::swap(mTexPrev, mTexCur);
-                        ++synthesizedThisSwap;
-                        activeMultiplier = 2;
+                        synthesizedThisSwap = effectiveMult - 1;
+                        activeMultiplier = effectiveMult;
                         mConsecutiveGlErrors = 0;
                     } else {
                         ++mConsecutiveGlErrors;

@@ -39,9 +39,6 @@ public:
     static void onConfigChanged(std::string_view moduleId,
                                 std::string_view key,
                                 std::string_view value);
-    static void onQuickButtonEvent(std::string_view buttonId,
-                                   pl::modmenu::ButtonEvent eventType,
-                                   float value);
     static bool onKeyEvent(const pl::input::KeyEvent &event);
 
 private:
@@ -51,7 +48,6 @@ private:
     void handleConfigChange(std::string_view key, std::string_view value);
     void cyclePresetInGame();
     void syncSubsystemsAndPersist(bool refreshSchema);
-    void syncQuickButton(bool shouldShow);
     void onFramePresented(const RuntimeTelemetrySnapshot &telemetry);
 
     mutable std::mutex mMutex;
@@ -60,7 +56,6 @@ private:
     std::filesystem::path mDataDir{};
 
     std::atomic<bool> mModuleEnabled{true};
-    std::atomic<bool> mQuickButtonRegistered{false};
     std::atomic<std::int64_t> mLastHudPublishNs{0};
     std::atomic<std::int64_t> mLastSchemaRefreshNs{0};
 };

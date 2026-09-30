@@ -712,6 +712,21 @@ void testGlFrameInterpolatorAndStateGuard() {
                          reinterpret_cast<EGLSurface>(1));
     assert(mock_runtime::gOrigSwapCallCount == 2);
     assert(mock_runtime::gGl.drawArraysCount == 1);
+    assert(interp.telemetrySnapshot().activeMultiplier == 2);
+
+    // Verify 3x and 4x Single-Swap multipliers
+    cfg.frameGenMultiplier = 3;
+    cfg.autoTune = false;
+    interp.updateConfig(cfg);
+    interp.onSwapBuffers(reinterpret_cast<EGLDisplay>(1),
+                         reinterpret_cast<EGLSurface>(1));
+    assert(interp.telemetrySnapshot().activeMultiplier == 3);
+
+    cfg.frameGenMultiplier = 4;
+    interp.updateConfig(cfg);
+    interp.onSwapBuffers(reinterpret_cast<EGLDisplay>(1),
+                         reinterpret_cast<EGLSurface>(1));
+    assert(interp.telemetrySnapshot().activeMultiplier == 4);
 
     // Verify 100% of Minecraft's GL state was restored by GlStateGuard
     assert(mock_runtime::gGl.currentProgram == 77);
@@ -728,7 +743,7 @@ void testGlFrameInterpolatorAndStateGuard() {
     assert(mock_runtime::gGl.cullFace == GL_TRUE);
     assert(mock_runtime::gGl.scissorTest == GL_TRUE);
 
-    // Verify Multi-Swap mode generates strictly monotonic future timestamps
+    // Verify Multi-Swap mode generates strictly monotonic future timestamps for 2x, 3x, 4x
     cfg.frameGenMode = FrameGenMode::MultiSwapInterpolation;
     cfg.frameGenMultiplier = 3; // 2 intermediate + 1 final = 3 swaps
     cfg.autoTune = false;
@@ -750,7 +765,18 @@ void testGlFrameInterpolatorAndStateGuard() {
     assert(mock_runtime::gPresentedTimestamps[1] <
            mock_runtime::gPresentedTimestamps[2]);
 
-    std::cout << "  -> GlStateGuard, Single-Swap synthesis, and Multi-Swap monotonic timestamps verified.\n";
+    // Verify 4x (max) Multi-Swap issues 3 synthetic + 1 final = 4 swaps
+    cfg.frameGenMultiplier = 4;
+    interp.updateConfig(cfg);
+    const int swapsBefore4x = mock_runtime::gOrigSwapCallCount;
+    mock_runtime::gPresentedTimestamps.clear();
+    interp.onSwapBuffers(reinterpret_cast<EGLDisplay>(1),
+                         reinterpret_cast<EGLSurface>(1));
+    const int swapsDelta4x = mock_runtime::gOrigSwapCallCount - swapsBefore4x;
+    assert(swapsDelta4x == 4 && "4x Multi-Swap must issue 3 synthetic + 1 final swap");
+    assert(mock_runtime::gPresentedTimestamps.size() == 4);
+
+    std::cout << "  -> GlStateGuard, Single-Swap (2x/3x/4x), and Multi-Swap (2x/3x/4x) verified.\n";
 }
 
 void testModLifecycleAndModMenuIntegration() {
@@ -773,23 +799,41 @@ void testModLifecycleAndModMenuIntegration() {
     assert(reg->load(reg->instance, ctx));
     assert(reg->enable(reg->instance, ctx));
     assert(mock_runtime::gModuleRegistered);
-    assert(mock_runtime::gButtonRegistered);
+    assert(!mock_runtime::gButtonRegistered &&
+           "Must NOT register a floating logo button in the middle of the screen");
     assert(!mock_runtime::gLastSchemaJson.empty());
     assert(!mock_runtime::gLastDrawCommands.empty());
     assert(mock_runtime::gLastHudElements.size() == 1);
 
-    // Verify V2 schema contains categories, nodes, and telemetry
+    // Verify V2 schema contains categories, 2x/3x/4x multiplier options, and telemetry
     assert(mock_runtime::gLastSchemaJson.find("\"version\":2") !=
            std::string::npos);
     assert(mock_runtime::gLastSchemaJson.find("\"categories\":[") !=
            std::string::npos);
+    assert(mock_runtime::gLastSchemaJson.find("frame_gen_multiplier") !=
+           std::string::npos);
+    assert(mock_runtime::gLastSchemaJson.find("2×") != std::string::npos);
+    assert(mock_runtime::gLastSchemaJson.find("3×") != std::string::npos);
+    assert(mock_runtime::gLastSchemaJson.find("4×") != std::string::npos);
     assert(mock_runtime::gLastSchemaJson.find("fps_telemetry") !=
            std::string::npos);
 
     // Simulate in-game ModMenu user interactions
-    FrameGenMod::onConfigChanged(kModuleId, keys::kPreset, "2"); // Smooth preset
+    FrameGenMod::onConfigChanged(kModuleId, keys::kPreset, "2"); // Smooth preset (3x)
     assert(FrameGenMod::instance().configSnapshot().preset ==
            QualityPreset::Smooth);
+    assert(FrameGenMod::instance().configSnapshot().frameGenMultiplier == 3);
+
+    // Verify user selecting 2x, 3x, 4x, and clamping values > 4 to 4x max
+    FrameGenMod::onConfigChanged(kModuleId, keys::kFrameGenMultiplier, "2×");
+    assert(FrameGenMod::instance().configSnapshot().frameGenMultiplier == 2);
+    FrameGenMod::onConfigChanged(kModuleId, keys::kFrameGenMultiplier, "3×");
+    assert(FrameGenMod::instance().configSnapshot().frameGenMultiplier == 3);
+    FrameGenMod::onConfigChanged(kModuleId, keys::kFrameGenMultiplier, "4×");
+    assert(FrameGenMod::instance().configSnapshot().frameGenMultiplier == 4);
+    FrameGenMod::onConfigChanged(kModuleId, keys::kFrameGenMultiplier, "8");
+    assert(FrameGenMod::instance().configSnapshot().frameGenMultiplier == 4 &&
+           "4x must be the strict maximum multiplier");
 
     FrameGenMod::onConfigChanged(kModuleId, keys::kCameraSmoothness, "0.75");
     assert(FrameGenMod::instance().configSnapshot().preset ==
@@ -806,9 +850,8 @@ void testModLifecycleAndModMenuIntegration() {
     assert(std::abs(FrameGenMod::instance().configSnapshot().hudPosY - 64.0f) <
            1e-3f);
 
-    // Simulate Quick-Button click cycling preset (Custom=4 -> (4+1)%4 = 1 Balanced -> 2 Smooth)
-    FrameGenMod::onQuickButtonEvent(
-        kQuickButtonId, pl::modmenu::ButtonEvent::Click, 1.0f);
+    // Simulate Cycle Preset action button in V2 RuntimeConfigView
+    FrameGenMod::onConfigChanged(kModuleId, keys::kActionCyclePreset, "1");
     assert(FrameGenMod::instance().configSnapshot().preset ==
            QualityPreset::Balanced);
 

@@ -12,15 +12,6 @@ constexpr int kAndroidKeycodeF9 = 139;
 constexpr std::int64_t kHudUpdateIntervalNs = 200'000'000LL;     // 5 Hz
 constexpr std::int64_t kSchemaRefreshIntervalNs = 900'000'000LL; // ~1.1 Hz
 
-constexpr const char *kQuickButtonSvgIcon = R"svg(
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect x="6" y="6" width="52" height="52" rx="14" fill="#121B24" stroke="#38E8B0" stroke-width="3"/>
-  <path d="M20 40 L28 24 L36 34 L44 20" fill="none" stroke="#38E8B0" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="44" cy="20" r="3.5" fill="#58F2C2"/>
-  <path d="M18 46 H46" stroke="#58F2C2" stroke-width="2.5" stroke-linecap="round"/>
-</svg>
-)svg";
-
 std::int64_t steadyNowNs() noexcept {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
                std::chrono::steady_clock::now().time_since_epoch())
@@ -132,7 +123,6 @@ bool FrameGenMod::enable(pl::mod::ModContext &context) {
     const std::string schemaJson = buildV2ConfigSchemaJson(cfg, telemetry);
     HudRenderer::trySetConfigSchemaJson(kModuleId, schemaJson);
 
-    syncQuickButton(cfg.showQuickButton);
     HudRenderer::publishHud(cfg, telemetry);
 
     modLogger().info("{} enabled (EGL hook: {}, Camera hooks: {})", kModName,
@@ -148,7 +138,6 @@ bool FrameGenMod::disable(pl::mod::ModContext & /*context*/) {
     CameraSmoother::instance().updateConfig(configSnapshot(), false);
 
     HudRenderer::clearHud();
-    syncQuickButton(false);
     HudRenderer::tryClearConfigSchemaJson(kModuleId);
     pl::modmenu::unregisterModule(kModuleId);
 
@@ -193,17 +182,6 @@ void FrameGenMod::onConfigChanged(std::string_view moduleId,
         return;
     }
     instance().handleConfigChange(key, value);
-}
-
-void FrameGenMod::onQuickButtonEvent(std::string_view buttonId,
-                                     pl::modmenu::ButtonEvent eventType,
-                                     float /*value*/) {
-    if (buttonId != kQuickButtonId) {
-        return;
-    }
-    if (eventType == pl::modmenu::ButtonEvent::Click) {
-        instance().cyclePresetInGame();
-    }
 }
 
 bool FrameGenMod::onKeyEvent(const pl::input::KeyEvent &event) {
@@ -288,7 +266,6 @@ void FrameGenMod::syncSubsystemsAndPersist(bool refreshSchema) {
 
     CameraSmoother::instance().updateConfig(cfg, enabled);
     GlFrameInterpolator::instance().updateConfig(cfg);
-    syncQuickButton(cfg.showQuickButton && enabled);
 
     RuntimeTelemetrySnapshot telemetry =
         GlFrameInterpolator::instance().telemetrySnapshot();
@@ -305,47 +282,6 @@ void FrameGenMod::syncSubsystemsAndPersist(bool refreshSchema) {
     if (refreshSchema) {
         HudRenderer::trySetConfigSchemaJson(
             kModuleId, buildV2ConfigSchemaJson(cfg, telemetry));
-    }
-}
-
-void FrameGenMod::syncQuickButton(bool shouldShow) {
-    const bool currentlyRegistered =
-        mQuickButtonRegistered.load(std::memory_order_relaxed);
-    if (shouldShow && !currentlyRegistered) {
-        std::string ownerModId;
-        {
-            std::lock_guard<std::mutex> lock(mMutex);
-            ownerModId = mModId;
-        }
-
-        pl::modmenu::ButtonInfo btn{};
-        btn.buttonId = kQuickButtonId;
-        btn.displayName = "LeviFrameGen Preset";
-        btn.moduleId = kModuleId;
-        btn.modId = ownerModId;
-        btn.label = "FG";
-        btn.behavior = pl::modmenu::ButtonBehavior::Click;
-        btn.defaultVisible = true;
-        btn.stylePreset = pl::modmenu::ButtonStylePreset::Accent;
-        btn.normalBgColor = 0xCC121B24U;
-        btn.activeBgColor = 0xFF38E8B0U;
-        btn.borderColor = 0xAA38E8B0U;
-        btn.textColor = 0xFF58F2C2U;
-        btn.activeTextColor = 0xFF0A1016U;
-        btn.iconFormat = pl::modmenu::ButtonIconFormat::Svg;
-        btn.hideLabelWhenIconPresent = false;
-        btn.iconData.assign(
-            reinterpret_cast<const unsigned char *>(kQuickButtonSvgIcon),
-            reinterpret_cast<const unsigned char *>(kQuickButtonSvgIcon) +
-                std::char_traits<char>::length(kQuickButtonSvgIcon));
-        btn.onEvent = &FrameGenMod::onQuickButtonEvent;
-
-        if (HudRenderer::tryRegisterButton(btn)) {
-            mQuickButtonRegistered.store(true, std::memory_order_relaxed);
-        }
-    } else if (!shouldShow && currentlyRegistered) {
-        HudRenderer::tryUnregisterButton(kQuickButtonId);
-        mQuickButtonRegistered.store(false, std::memory_order_relaxed);
     }
 }
 

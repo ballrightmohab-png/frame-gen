@@ -33,8 +33,6 @@ public:
     static bool trySetConfigSchemaJson(std::string_view moduleId,
                                        std::string_view schemaJson) noexcept;
     static void tryClearConfigSchemaJson(std::string_view moduleId) noexcept;
-    static bool tryRegisterButton(const pl::modmenu::ButtonInfo &info) noexcept;
-    static void tryUnregisterButton(std::string_view buttonId) noexcept;
 };
 
 } // namespace framegen

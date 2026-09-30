@@ -13,8 +13,6 @@ using ClearConfigSchemaFn = void (*)(std::string_view);
 using SubmitHudEditorElementsFn =
     void (*)(std::string_view,
              std::span<const pl::modmenu::HudEditorElement>);
-using RegisterButtonFn = bool (*)(const pl::modmenu::ButtonInfo &);
-using UnregisterButtonFn = void (*)(std::string_view);
 
 void cardDimensionsForStyle(HudStyle style, float &outW,
                             float &outH) noexcept {
@@ -268,34 +266,6 @@ void HudRenderer::tryClearConfigSchemaJson(std::string_view moduleId) noexcept {
     }
 #else
     pl::modmenu::clearConfigSchema(moduleId);
-#endif
-}
-
-bool HudRenderer::tryRegisterButton(
-    const pl::modmenu::ButtonInfo &info) noexcept {
-#if defined(__ANDROID__)
-    static auto fn = reinterpret_cast<RegisterButtonFn>(dlsym(
-        RTLD_DEFAULT, "_ZN2pl7modmenu14registerButtonERKNS0_10ButtonInfoE"));
-    if (fn != nullptr) {
-        return fn(info);
-    }
-    return false;
-#else
-    return pl::modmenu::registerButton(info);
-#endif
-}
-
-void HudRenderer::tryUnregisterButton(std::string_view buttonId) noexcept {
-#if defined(__ANDROID__)
-    static auto fn = reinterpret_cast<UnregisterButtonFn>(dlsym(
-        RTLD_DEFAULT,
-        "_ZN2pl7modmenu16unregisterButtonENSt6__ndk117basic_string_viewIcNS1_"
-        "11char_traitsIcEEEE"));
-    if (fn != nullptr) {
-        fn(buttonId);
-    }
-#else
-    pl::modmenu::unregisterButton(buttonId);
 #endif
 }
 

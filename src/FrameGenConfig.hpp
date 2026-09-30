@@ -11,10 +11,9 @@ namespace framegen {
 
 inline constexpr const char *kModId = "leviframegen";
 inline constexpr const char *kModuleId = "leviframegen.module";
-inline constexpr const char *kQuickButtonId = "leviframegen.quick_button";
 inline constexpr const char *kHudElementId = "leviframegen.hud_card";
 inline constexpr const char *kModName = "LeviFrameGen";
-inline constexpr const char *kModVersion = "2.0.0";
+inline constexpr const char *kModVersion = "2.1.0";
 inline constexpr const char *kModAuthor = "ballrightmohab-png";
 
 // Configuration keys exposed to LeviLauncher Mod Menu (V1 & V2)
@@ -42,7 +41,6 @@ inline constexpr const char *kHudStyle = "hud_style";
 inline constexpr const char *kHudOpacity = "hud_opacity";
 inline constexpr const char *kHudPosX = "hud_pos_x";
 inline constexpr const char *kHudPosY = "hud_pos_y";
-inline constexpr const char *kShowQuickButton = "show_quick_button";
 
 // Action button keys in V2 RuntimeConfigView
 inline constexpr const char *kActionResetDefaults = "action_reset_defaults";
@@ -136,7 +134,6 @@ struct FrameGenConfig {
     int hudOpacity = 85;                 // 20 .. 100
     float hudPosX = 16.0f;
     float hudPosY = 16.0f;
-    bool showQuickButton = true;
 
     void normalize() noexcept;
     void applyPreset(QualityPreset newPreset) noexcept;

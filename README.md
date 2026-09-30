@@ -1,45 +1,106 @@
 # LeviFrameGen (`FrameGen.levipack`)
 
-**LeviFrameGen v2.0** is a native `preload-native` C++20 mod for **Minecraft Bedrock Edition on Android (`arm64-v8a`)** running under **LeviLaunchroid (`LeviLauncher`)**.
+**LeviFrameGen v2.1** is a native `preload-native` C++20 mod for **Minecraft Bedrock Edition on Android (`arm64-v8a`)** running under **LeviLaunchroid (`LeviLauncher`)**.
 
-It combines **GPU Frame Generation & Motion-Compensated Temporal Synthesis** (`libEGL.so` / `GLESv2`) with **100% Angle-Conserving Sub-Pixel Camera Smoothing** (`libminecraftpe.so` native camera detours) and full **LeviLaunchroid Mod Menu UI (V1 + V2 Schema + HUD Editor + Floating Quick-Preset Button)** integration.
+It combines **GPU Frame Generation (`2×` / `3×` / `4×` Max)** with **100% Angle-Conserving Sub-Pixel Camera Smoothing** and full **LeviLaunchroid Mod Menu UI** configuration.
+
+---
+
+## Best Settings Guide (Recommended Configurations)
+
+You can apply these settings anytime in-game by opening the **LeviLaunchroid Mod Menu** and selecting **LeviFrameGen**.
+
+### 1. Best Overall Settings (Recommended for Most Phones — 60Hz to 120Hz)
+This gives the cleanest balance of high perceived frame rate, zero HUD/crosshair ghosting, and ultra-responsive camera movement:
+- **Performance & Smoothness Preset**: `Balanced` (or `Custom` with the values below)
+- **Rendered Frame Multiplier**: **`2×`** (or **`3×`** on 90Hz/120Hz displays)
+- **Frame Generation Mode**: `Single-Swap Motion Synthesis` *(zero SurfaceFlinger queue jitter)*
+- **Temporal Synthesis Strength**: **`0.65` – `0.75`**
+- **Optical Motion Vector Scale**: **`1.00×`**
+- **HUD & Crosshair Edge Protection**: **`0.88` – `0.92`**
+- **Scene-Cut Reset Threshold**: **`42.0 deg/f`**
+- **Camera Smoothing Algorithm**: `Adaptive Smart (1-Euro)`
+- **Camera Smoothing Strength**: **`0.55`**
+- **Fast-Turn Responsiveness Gain**: **`1.05×`**
+- **Touch Micro-Jitter Deadzone**: **`0.025 deg`**
+- **FOV-Aware Zoom Sensitivity Scaling**: **`ON`**
+- **Smart Auto-Tune Budget Guard**: **`ON`**
+
+---
+
+### 2. Best Settings for Maximum Smoothness (`3×` / `4×` Ultra Smooth)
+Best for **90Hz / 120Hz / 144Hz** screens, survival worlds, shaders, or cinematic gameplay where you want the highest possible fluidity:
+- **Performance & Smoothness Preset**: `Smooth` (`3×`) or `Ultra` (`4×`)
+- **Rendered Frame Multiplier**: **`3×`** or **`4× (Max)`**
+- **Frame Generation Mode**:
+  - Choose **`Single-Swap Motion Synthesis`** if you want zero display-buffer lag.
+  - Choose **`Multi-Swap Frame Interpolation`** on 120Hz/144Hz phones if your GPU has headroom for extra swap passes.
+- **Temporal Synthesis Strength**: **`0.78` – `0.85`**
+- **Optical Motion Vector Scale**: **`1.05×` – `1.10×`**
+- **HUD & Crosshair Edge Protection**: **`0.86`**
+- **Camera Smoothing Algorithm**: `Adaptive Smart (1-Euro)` or `Critically Damped Spring`
+- **Camera Smoothing Strength**: **`0.65` – `0.72`**
+- **Fast-Turn Responsiveness Gain**: **`1.00×`**
+- **Touch Micro-Jitter Deadzone**: **`0.030 deg`**
+
+---
+
+### 3. Best Settings for Competitive PvP / Bedwars / Skywars (Instant Flicks)
+Tuned to eliminate touch digitizer jitter while keeping 180° combat flicks instantaneous:
+- **Rendered Frame Multiplier**: **`2×`** (or **`3×`**)
+- **Frame Generation Mode**: `Single-Swap Motion Synthesis`
+- **Temporal Synthesis Strength**: **`0.55` – `0.65`**
+- **HUD & Crosshair Edge Protection**: **`0.92`** *(keeps crosshair 100% locked)*
+- **Camera Smoothing Algorithm**: `Adaptive Smart (1-Euro)`
+- **Camera Smoothing Strength**: **`0.40` – `0.50`**
+- **Fast-Turn Responsiveness Gain**: **`1.35×` – `1.60×`** *(ramps cutoff frequency immediately during fast flicks)*
+- **Touch Micro-Jitter Deadzone**: **`0.020 deg`**
+- **Turn-Spike Clamp**: **`75.0 deg/f`**
+
+---
+
+### 4. Best Settings for Budget / Low-End Phones (Battery & Thermal Friendly)
+Ideal when your phone heats up or drops frames in heavy chunks:
+- **Performance & Smoothness Preset**: `Power Saver`
+- **Rendered Frame Multiplier**: **`2×`**
+- **Frame Generation Mode**: `Single-Swap Motion Synthesis`
+- **Temporal Synthesis Strength**: **`0.45` – `0.55`**
+- **Camera Smoothing Algorithm**: `Exponential (EMA)` or `Adaptive Smart (1-Euro)`
+- **Camera Smoothing Strength**: **`0.45`**
+- **Smart Auto-Tune Budget Guard**: **`ON`** *(automatically scales workload if frame time spikes)*
+- **Frame Pacer Target FPS**: **`60 FPS`** *(or `0` for native VSync)*
+
+---
+
+### Quick Reference Table: What Each Setting Does
+
+| Setting | Range / Options | Recommended | What It Does |
+| :--- | :--- | :--- | :--- |
+| **Rendered Frame Multiplier** | `2×`, `3×`, `4×` (Max) | `2×` or `3×` | Chooses how many frames are generated per real frame (`2×` Double, `3×` Triple, `4×` Quad Max). |
+| **Frame Generation Mode** | `Off`, `Single-Swap`, `Multi-Swap` | `Single-Swap` | `Single-Swap` integrates sub-frame motion inside Minecraft's native swap; `Multi-Swap` submits `2×`–`4×` swaps with presentation timestamps. |
+| **Temporal Synthesis Strength** | `0.00` – `1.00` | `0.65` | Controls how strongly motion-compensated sub-frames are blended. |
+| **Optical Motion Vector Scale** | `0.00×` – `2.00×` | `1.00×` | Scales camera-velocity-to-screen-UV optical flow warping. |
+| **HUD & Crosshair Edge Protection** | `0.00` – `1.00` | `0.88` | Detects static HUD/hotbar/crosshair pixels and pins them to prevent ghosting. |
+| **Camera Smoothing Algorithm** | `Off`, `EMA`, `Spring`, `Adaptive Smart` | `Adaptive Smart` | Selects the 100% angle-conserving camera filter law. |
+| **Camera Smoothing Strength** | `0.00` – `0.95` | `0.55` | Higher values make slow camera pans silkier. |
+| **Fast-Turn Responsiveness Gain** | `0.10×` – `2.50×` | `1.05×` | Higher values make fast combat flicks snap immediately with zero lag. |
+| **Touch Micro-Jitter Deadzone** | `0.000` – `0.500 deg` | `0.025 deg` | Filters out stationary touchscreen polling noise without losing slow aim. |
+| **Smart Auto-Tune Budget Guard** | `ON` / `OFF` | `ON` | Steps down synthesis workload during heavy chunk-loading spikes. |
 
 ---
 
 ## Key Features
 
-### 1. GPU Frame Generation & Temporal Synthesis (`GlFrameInterpolator`)
-- **Native `eglSwapBuffers` Hook**: Hooks `eglSwapBuffers` in `libEGL.so` and validates `eglGetCurrentContext()`, surface dimensions (`EGL_WIDTH` / `EGL_HEIGHT`), and `EGL_RENDER_BUFFER == EGL_BACK_BUFFER (0x3084)` so offscreen pbuffers and auxiliary surfaces are never corrupted.
-- **Two Synthesis Modes**:
-  - **Single-Swap Motion Synthesis (Safe Default)**: Synthesizes a motion-compensated, HUD-aware frame directly in the backbuffer before presentation using a 5-tap bidirectional optical-flow reconstruction shader and 5-tap contrast-adaptive sharpening (CAS). Works cleanly across all Android Adreno/Mali/Xclipse drivers without SurfaceFlinger queue stalls.
-  - **Multi-Swap Display Interpolation (`2x` / `3x` / `4x`)**: Presents `M-1` intermediate synthesized sub-frames with strictly monotonic `eglPresentationTimeANDROID` timestamps (`tPrev + (k/M) * frameIntervalNs`) followed by the real frame on high-refresh-rate (`90Hz` / `120Hz` / `144Hz`) displays.
-- **HUD & Crosshair Ghosting Protection (`preserveHudCrosshair`)**: Detects high-saturation/high-contrast UI elements and crosshair pixels in the fragment shader and pins them to the latest rendered frame so hotbars, menus, and crosshairs never ghost during fast camera turns.
-- **Scene-Cut & Teleport Guard (`sceneCutProtection`)**: Automatically resets temporal frame history on dimension changes, respawns, F5 camera perspective toggles, FOV snaps, or large camera flicks above the configurable cut threshold.
-- **Strict `GlStateGuard` RAII Restoration**: Saves and restores all 16 OpenGL ES bindings (`GL_FRAMEBUFFER_BINDING`, `GL_CURRENT_PROGRAM`, `GL_ARRAY_BUFFER_BINDING`, `GL_ELEMENT_ARRAY_BUFFER_BINDING`, `GL_ACTIVE_TEXTURE`, `GL_TEXTURE_BINDING_2D` on units 0 & 1, `GL_VIEWPORT`, `GL_SCISSOR_BOX`, `GL_BLEND` + `glBlendFuncSeparate`, `GL_DEPTH_TEST`, `GL_SCISSOR_TEST`, `GL_CULL_FACE`, `GL_STENCIL_TEST`, and `GL_COLOR_WRITEMASK`) so Minecraft's RenderDragon pipeline is never disturbed.
+### 1. Selectable `2×`, `3×`, and `4×` (Max) GPU Frame Generation (`GlFrameInterpolator`)
+- **Direct `2×` / `3×` / `4×` Selector in Mod Menu**: Pick `2×` (Double FPS), `3×` (Triple FPS), or `4×` (Quad FPS — Max) right from the top of the Mod Menu.
+- **Works in Both Single-Swap and Multi-Swap Modes**:
+  - **Single-Swap Motion Synthesis (`2×` / `3×` / `4×`)**: Integrates 1-phase (`2×`), 2-phase (`3×`), or 3-phase (`4×`) bidirectional optical-flow samples in a single native swap pass for zero SurfaceFlinger queue latency.
+  - **Multi-Swap Frame Interpolation (`2×` / `3×` / `4×`)**: Submits `1`, `2`, or `3` intermediate synthesized frames plus the final frame (`2×`, `3×`, or `4×` total swaps) with monotonic `eglPresentationTimeANDROID` timestamps.
+- **No Center-Screen Logo**: Clean in-game view with zero floating logo clutter in the middle of the screen; optional top-left telemetry HUD card can be toggled or dragged anywhere via the LeviLaunchroid HUD Editor.
 
 ### 2. 100% Angle-Conserving Camera Smoother (`CameraSmoother`)
-- **Direct `libminecraftpe.so` Camera Hooks**:
-  - `LocalPlayer::applyTurnDelta(Vec2 const&)` via ARM64 signature resolution.
-  - `CameraAPI::tryGetFOV` (`9CameraAPI` vtable index `7`) for automatic zoom-aware smoothing.
-  - `VanillaCameraAPI::getCameraPerspective` (`16VanillaCameraAPI` vtable index `7`) for instant F5 perspective-cut detection.
-- **Zero Lost Aim / Zero Stationary Drift**:
-  - Uses a **2-pole sub-pixel residual reservoir (`double` precision)**. Every microradian of touch/mouse/controller input enters the reservoir and is Subtracted only as it is emitted to `LocalPlayer::applyTurnDelta`. Total camera rotation is **100.000% conserved** with zero stationary drift.
-- **Three Selectable Filter Laws**:
-  - **Adaptive Smart (1-Euro Filter)**: Velocity-adaptive 2-pole filter with derivative low-pass filtering and soft-knee fast-flick boost. Heavy jitter elimination during fine aiming; near-zero latency on fast 180° combat flicks.
-  - **Critically Damped Spring**: Analytical critically-damped harmonic oscillator ($\zeta = 1.0$) with zero overshoot.
-  - **Exponential (2-Pole Low-Pass)**: Classic cascaded exponential smoothing with frame-rate-independent time constant $\tau$.
-- **Hysteresis Micro-Deadzone (`microDeadzone`)**: Suppresses touch digitizer polling noise while stationery without swallowing intentional slow diagonal aim.
-
-### 3. In-Game LeviLaunchroid Mod Menu UI (`FrameGenConfig` & `HudRenderer`)
-- **Dual V1 + V2 ModMenu Registration**:
-  - Registers all controls via `pl::modmenu::ModuleBuilder` (V1) **and** a rich categorized `pl::modmenu::ConfigSchemaBuilder` (V2 JSON schema) with Segmented/Chip selectors, sliders with units, conditional visibility (`visibleWhen`), live telemetry badges, and instant action buttons (`Reset Camera State`, `Restore Recommended Defaults`).
-- **5 Built-In Profiles**: `Power Saver`, `Balanced (Recommended)`, `Smooth`, `Ultra`, and `Custom` (automatically selected when tuning individual sliders).
-- **Live Telemetry HUD Overlay + HUD Editor Support**:
-  - Renders a customizable overlay card (`Detailed`, `Compact`, or `Minimal`) via `pl::modmenu::submitDrawCommands` showing Effective FPS, Real FPS, 1% Low FPS, Frame Time (`ms`), Jitter (`ms`), active FrameGen multiplier, and Camera Smoothing mode.
-  - Registers a draggable/snappable `HudEditorElement` via `pl::modmenu::submitHudEditorElements` so the HUD card can be repositioned directly in LeviLaunchroid's HUD Editor.
-- **Floating Quick-Preset Button & Hotkeys**:
-  - Optional floating SVG badge button (`pl::modmenu::registerButton`) to cycle presets with one tap in-game.
-  - Keyboard/controller shortcuts: `F8` toggles LeviFrameGen, `F9` cycles presets.
+- **Native `libminecraftpe.so` Camera Hooks**: Hooks `LocalPlayer::applyTurnDelta(Vec2 const&)`, `CameraAPI::tryGetFOV`, and `VanillaCameraAPI::getCameraPerspective`.
+- **2-Pole Sub-Pixel Residual Reservoir**: Every microradian of input rotation is accumulated in `double` precision and subtracted only as it is emitted to the game, guaranteeing **100.000% angle conservation** and **zero stationary drift**.
 
 ---
 
@@ -47,8 +108,8 @@ It combines **GPU Frame Generation & Motion-Compensated Temporal Synthesis** (`l
 
 1. Download **`FrameGen.levipack`** from the repository root or the GitHub Actions **Artifacts** / **Releases** tab.
 2. Open **LeviLaunchroid (`LeviLauncher`)** on your Android device.
-3. Import **`FrameGen.levipack`** in the **Mods** tab and enable **FrameGen & Camera Smoother**.
-4. Launch Minecraft Bedrock and open the **LeviLaunchroid Mod Menu** overlay to customize presets, frame generation, camera smoothing, and the live FPS HUD.
+3. Import **`FrameGen.levipack`** in the **Mods** tab and enable **LeviFrameGen**.
+4. Launch Minecraft Bedrock and open the **LeviLaunchroid Mod Menu** to pick `2×`, `3×`, or `4×` and tune your settings.
 
 ---
 
