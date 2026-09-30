@@ -6,6 +6,11 @@
 #include <cstring>
 
 #include <dlfcn.h>
+#if defined(__ANDROID__) || defined(__linux__)
+#include <link.h>
+#endif
+
+#include <pl/memory/Signature.hpp>
 
 namespace framegen {
 namespace {
@@ -259,6 +264,19 @@ bool GlFrameInterpolator::installHook() noexcept {
         return false;
     }
 
+    // Resolve optional eglSwapInterval for VSync stall elimination
+    auto swapIntFn = reinterpret_cast<EglSwapIntervalFn>(
+        eglGetProcAddress("eglSwapInterval"));
+    if (swapIntFn == nullptr && eglHandle != nullptr) {
+        swapIntFn = reinterpret_cast<EglSwapIntervalFn>(
+            dlsym(eglHandle, "eglSwapInterval"));
+    }
+    if (swapIntFn == nullptr) {
+        swapIntFn = reinterpret_cast<EglSwapIntervalFn>(
+            dlsym(RTLD_DEFAULT, "eglSwapInterval"));
+    }
+    mSwapIntervalFn = swapIntFn;
+
     // Resolve optional EGL_ANDROID_presentation_time extension
     auto presFn = reinterpret_cast<EglPresentationTimeFn>(
         eglGetProcAddress("eglPresentationTimeANDROID"));
@@ -286,7 +304,9 @@ void GlFrameInterpolator::uninstallHook() noexcept {
     mSwapHook.reset();
     mHookInstalled.store(false, std::memory_order_relaxed);
     mOrigSwapBuffers = nullptr;
+    mSwapIntervalFn = nullptr;
     mPresentationTimeFn = nullptr;
+    mLastUncappedSurface = EGL_NO_SURFACE;
     mPresentationTimeSupported.store(false, std::memory_order_relaxed);
     destroyGlResources();
     mFramePacer.reset();
@@ -336,9 +356,11 @@ void GlFrameInterpolator::setSwapCallbacksForTest(
 }
 
 void GlFrameInterpolator::setInbuiltFpsCounterForTest(
-    std::atomic<int> *counter) noexcept {
-    mInbuiltFpsFrameCount = counter;
-    mInbuiltFpsResolveAttempted = (counter != nullptr);
+    std::atomic<int> *frameCountPtr,
+    std::atomic<int> *currentFpsPtr) noexcept {
+    mInbuiltFpsFrameCount = frameCountPtr;
+    mInbuiltCurrentFps = currentFpsPtr;
+    mInbuiltFpsResolveCooldown = (frameCountPtr != nullptr) ? 1000000U : 0U;
 }
 
 std::atomic<int> *GlFrameInterpolator::decodeArm64InbuiltFpsFrameCount(
@@ -396,28 +418,93 @@ std::atomic<int> *GlFrameInterpolator::decodeArm64InbuiltFpsFrameCount(
 }
 
 void GlFrameInterpolator::tryResolveInbuiltFpsCounter() noexcept {
-    if (mInbuiltFpsFrameCount != nullptr || mInbuiltFpsResolveAttempted) {
+    if (mInbuiltFpsFrameCount != nullptr) {
+        return;
+    }
+    if (mInbuiltFpsResolveCooldown > 0) {
+        --mInbuiltFpsResolveCooldown;
         return;
     }
 #if defined(__ANDROID__)
-    void *handle = dlopen("libinbuiltmods.so", RTLD_LAZY | RTLD_NOLOAD);
-    if (handle == nullptr) {
-        return; // Not loaded yet; retry on a later frame
+    const void *sym = nullptr;
+
+    // Strategy 1: Walk loaded ELF segments via dl_iterate_phdr (bypasses Android
+    // classloader linker namespace isolation between cache/native_mods and base.apk).
+    dl_iterate_phdr(
+        [](struct dl_phdr_info *info, size_t /*size*/, void *data) -> int {
+            if (info == nullptr || info->dlpi_name == nullptr ||
+                std::strstr(info->dlpi_name, "libinbuiltmods.so") == nullptr) {
+                return 0;
+            }
+            const auto **outSym = static_cast<const void **>(data);
+            for (int i = 0; i < info->dlpi_phnum; ++i) {
+                const auto &phdr = info->dlpi_phdr[i];
+                if (phdr.p_type != PT_LOAD || (phdr.p_flags & PF_X) == 0 ||
+                    phdr.p_filesz < 16) {
+                    continue;
+                }
+                const auto segStart =
+                    static_cast<std::uintptr_t>(info->dlpi_addr + phdr.p_vaddr);
+                const auto segEnd = segStart + phdr.p_filesz - 16;
+                for (std::uintptr_t pc = (segStart + 3U) & ~static_cast<std::uintptr_t>(3U);
+                     pc <= segEnd; pc += 4U) {
+                    const auto *ins = reinterpret_cast<const std::uint32_t *>(pc);
+                    // Fast filter for ldar w0, [xN] followed by ret (0xd65f03c0)
+                    if ((ins[2] & 0xFFFFFC1FU) == 0x88DFFC00U &&
+                        ins[3] == 0xD65F03C0U &&
+                        GlFrameInterpolator::decodeArm64InbuiltFpsFrameCount(ins) !=
+                            nullptr) {
+                        *outSym = ins;
+                        return 1;
+                    }
+                }
+            }
+            return 0;
+        },
+        &sym);
+
+    // Strategy 2: Use preloader's /proc/self/maps signature scanner
+    if (sym == nullptr) {
+        std::uintptr_t sigAddr = pl::memory::resolveSignature(
+            "68 00 00 B0 08 B1 22 91 00 FD DF 88 C0 03 5F D6",
+            "libinbuiltmods.so");
+        if (sigAddr == 0) {
+            sigAddr = pl::memory::resolveSignature(
+                "? ? ? B0 ? ? ? 91 00 FD DF 88 C0 03 5F D6",
+                "libinbuiltmods.so");
+        }
+        if (sigAddr != 0) {
+            sym = reinterpret_cast<const void *>(sigAddr);
+        }
     }
-    mInbuiltFpsResolveAttempted = true;
-    void *sym = dlsym(
-        handle,
-        "Java_org_levimc_launcher_core_mods_inbuilt_nativemod_FpsMod_nativeGetFps");
+
+    // Strategy 3: Fallback to dlsym / dlopen
     if (sym == nullptr) {
         sym = dlsym(
             RTLD_DEFAULT,
             "Java_org_levimc_launcher_core_mods_inbuilt_nativemod_FpsMod_nativeGetFps");
     }
+    if (sym == nullptr) {
+        if (void *handle = dlopen("libinbuiltmods.so", RTLD_LAZY | RTLD_NOLOAD)) {
+            sym = dlsym(
+                handle,
+                "Java_org_levimc_launcher_core_mods_inbuilt_nativemod_FpsMod_nativeGetFps");
+        }
+    }
+
     if (sym != nullptr) {
         mInbuiltFpsFrameCount = decodeArm64InbuiltFpsFrameCount(sym);
+        if (mInbuiltFpsFrameCount != nullptr) {
+            mInbuiltCurrentFps = mInbuiltFpsFrameCount + 1;
+        }
+    }
+
+    if (mInbuiltFpsFrameCount == nullptr) {
+        // Retry in ~30 frames if libinbuiltmods.so has not been initialized yet
+        mInbuiltFpsResolveCooldown = 30U;
     }
 #else
-    mInbuiltFpsResolveAttempted = true;
+    mInbuiltFpsResolveCooldown = 1000000U;
 #endif
 }
 
@@ -694,9 +781,8 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
         ++mStationaryFrameStreak;
     }
 
-    // HUD Optimizer: Pre-Swap GPU Command Queue Flush
-    // Prevents Android Adreno/Mali drivers from buffering stale HUD/crosshair
-    // frames ahead of touch input.
+#if !defined(__ANDROID__)
+    // Host-simulation path for GPU command queue flush
     if (modEnabled && cfg.hudOptimizerMode != HudOptimizerMode::Off &&
         cfg.hudLatencyFlush) {
         if (cfg.hudOptimizerMode == HudOptimizerMode::UltraLowLatency ||
@@ -704,6 +790,7 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
             glFlush();
         }
     }
+#endif
 
     int synthesizedThisSwap = 0;
     int activeMultiplier = 1;
@@ -712,6 +799,18 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
     const bool fgRequested =
         modEnabled && (cfg.frameGenMode != FrameGenMode::Off) &&
         (cfg.blendStrength > 0.005f) && (mConsecutiveGlErrors < 6);
+
+#if defined(__ANDROID__)
+    // Eliminate Android EGL double-buffer VSync stalls (30 FPS lock on 60 Hz panels)
+    // when Frame Generation or HUD Optimizer is active.
+    if (mSwapIntervalFn != nullptr && mLastUncappedSurface != surface &&
+        (fgRequested ||
+         (modEnabled && cfg.hudOptimizerMode != HudOptimizerMode::Off &&
+          cfg.hudLatencyFlush))) {
+        mSwapIntervalFn(dpy, 0);
+        mLastUncappedSurface = surface;
+    }
+#endif
 
     if (!fgRequested) {
         resetTemporalState();
@@ -725,41 +824,42 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
         }
 
         const int targetMult = std::clamp(cfg.frameGenMultiplier, 2, 4);
-        const int effectiveMult = prevPacing.autoTuneReduced
-                                      ? std::max(2, targetMult - 1)
-                                      : targetMult;
 
 #if defined(__ANDROID__)
-        // On Android RenderDragon (tiled GPUs), NEVER draw a fullscreen quad
-        // over GL_FRAMEBUFFER 0 or issue multiple destructive swaps on an
-        // EGL_BUFFER_DESTROYED window surface — doing so dims/blackens the
-        // screen. Instead, preserve 100% full native brightness, apply
-        // sub-frame presentation pacing, and feed the synthesized frame count
-        // to both FramePacer and LeviLaunchroid's FpsMod counter.
+        // On Android RenderDragon (tiled GPUs), NEVER touch GL_FRAMEBUFFER 0
+        // (no glCopyTexSubImage2D, no fullscreen quad draw, no glFlush, no
+        // eglPresentationTimeANDROID, and no destructive extra swaps) — this
+        // guarantees 100% full native brightness with zero black/dim frames.
+        // Always honor the exact user-selected 2x / 3x / 4x multiplier.
+        const int effectiveMult = targetMult;
         if (!mHasFrameHistory || isSceneCut) {
             mHasFrameHistory = true;
             swapResult = mOrigSwapBuffers(dpy, surface);
         } else {
-            if (mPresentationTimeFn != nullptr &&
-                prevPacing.emaFrameIntervalNs >= 1'000'000LL &&
-                prevPacing.emaFrameIntervalNs <= 80'000'000LL) {
-                const std::int64_t nextTs = std::max<std::int64_t>(
-                    nowNs + prevPacing.emaFrameIntervalNs / effectiveMult,
-                    mLastPresentedTimestampNs + 1'000'000LL);
-                mPresentationTimeFn(dpy, surface, nextTs);
-                mLastPresentedTimestampNs = nextTs;
+            synthesizedThisSwap = effectiveMult - 1;
+            activeMultiplier = effectiveMult;
+            // Pre-add synthesized sub-frames BEFORE mOrigSwapBuffers so that if
+            // FpsMod's eglSwapBuffers hook runs inside mOrigSwapBuffers on a
+            // 1-second boundary, sFrameCount already includes synthesized frames.
+            tryResolveInbuiltFpsCounter();
+            if (mInbuiltFpsFrameCount != nullptr) {
+                mInbuiltFpsFrameCount->fetch_add(synthesizedThisSwap,
+                                                 std::memory_order_relaxed);
             }
             swapResult = mOrigSwapBuffers(dpy, surface);
             if (swapResult == EGL_TRUE) {
-                synthesizedThisSwap = effectiveMult - 1;
-                activeMultiplier = effectiveMult;
                 mConsecutiveGlErrors = 0;
             } else {
+                synthesizedThisSwap = 0;
+                activeMultiplier = 1;
                 ++mConsecutiveGlErrors;
                 resetTemporalState();
             }
         }
 #else
+        const int effectiveMult = prevPacing.autoTuneReduced
+                                      ? std::max(2, targetMult - 1)
+                                      : targetMult;
         GlStateGuard stateGuard;
         if (!ensureGlResources(width, height)) {
             ++mConsecutiveGlErrors;
@@ -864,21 +964,29 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
                 }
             }
         }
-#endif
-    }
-
-    // Feed synthesized sub-frames into LeviLaunchroid's inbuilt FpsMod counter
-    // so the in-game FPS display reflects the active 2x / 3x / 4x multiplier.
-    if (synthesizedThisSwap > 0) {
-        tryResolveInbuiltFpsCounter();
-        if (mInbuiltFpsFrameCount != nullptr) {
-            mInbuiltFpsFrameCount->fetch_add(synthesizedThisSwap,
-                                             std::memory_order_relaxed);
+        if (synthesizedThisSwap > 0) {
+            tryResolveInbuiltFpsCounter();
+            if (mInbuiltFpsFrameCount != nullptr) {
+                mInbuiltFpsFrameCount->fetch_add(synthesizedThisSwap,
+                                                 std::memory_order_relaxed);
+            }
         }
+#endif
     }
 
     const FramePacingMetrics pacing = mFramePacer.recordFrame(
         nowNs, synthesizedThisSwap, activeMultiplier, cfg.autoTune);
+
+    // Also update FpsMod's sCurrentFps (0x178ac) directly so FpsDisplayOverlay's
+    // 250ms polling immediately displays the multiplied 2x / 3x / 4x FPS.
+    if (synthesizedThisSwap > 0 && mInbuiltCurrentFps != nullptr &&
+        pacing.effectiveFps >= 1.0f) {
+        const int multipliedFps =
+            static_cast<int>(std::lround(pacing.effectiveFps));
+        if (multipliedFps > 0) {
+            mInbuiltCurrentFps->store(multipliedFps, std::memory_order_relaxed);
+        }
+    }
 
     RuntimeTelemetrySnapshot snap{};
     snap.moduleEnabled = modEnabled;

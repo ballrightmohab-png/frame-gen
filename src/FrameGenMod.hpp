@@ -54,6 +54,7 @@ private:
     FrameGenConfig mConfig{};
     std::string mModId{kModId};
     std::filesystem::path mDataDir{};
+    JavaVM *mJavaVm = nullptr;
 
     std::atomic<bool> mModuleEnabled{true};
     std::atomic<std::int64_t> mLastHudPublishNs{0};

@@ -721,7 +721,9 @@ void testGlFrameInterpolatorAndStateGuard() {
            reinterpret_cast<std::atomic<int> *>(&fakePage[8]));
 
     std::atomic<int> mockFpsModFrameCount{0};
-    interp.setInbuiltFpsCounterForTest(&mockFpsModFrameCount);
+    std::atomic<int> mockFpsModCurrentFps{0};
+    interp.setInbuiltFpsCounterForTest(&mockFpsModFrameCount,
+                                       &mockFpsModCurrentFps);
 
     // Frame 1 (seeds history, 1 swap)
     interp.onSwapBuffers(reinterpret_cast<EGLDisplay>(1),
@@ -732,12 +734,15 @@ void testGlFrameInterpolatorAndStateGuard() {
 
     // Frame 2 (2x mode: adds +1 synthesized frame to FpsMod counter -> 1 real + 1 synth = 2x FPS)
     mockFpsModFrameCount.store(0);
+    mockFpsModCurrentFps.store(0);
     interp.onSwapBuffers(reinterpret_cast<EGLDisplay>(1),
                          reinterpret_cast<EGLSurface>(1));
     assert(mock_runtime::gOrigSwapCallCount == 2);
     assert(mock_runtime::gGl.drawArraysCount == 1);
     assert(interp.telemetrySnapshot().activeMultiplier == 2);
     assert(mockFpsModFrameCount.load() == 1);
+    const int fps2x = mockFpsModCurrentFps.load();
+    assert(fps2x > 0);
 
     // Verify 3x and 4x Single-Swap multipliers and FpsMod counter injection (+2 and +3)
     cfg.frameGenMultiplier = 3;
@@ -748,6 +753,8 @@ void testGlFrameInterpolatorAndStateGuard() {
                          reinterpret_cast<EGLSurface>(1));
     assert(interp.telemetrySnapshot().activeMultiplier == 3);
     assert(mockFpsModFrameCount.load() == 2);
+    const int fps3x = mockFpsModCurrentFps.load();
+    assert(fps3x > fps2x);
 
     cfg.frameGenMultiplier = 4;
     interp.updateConfig(cfg);
@@ -756,6 +763,8 @@ void testGlFrameInterpolatorAndStateGuard() {
                          reinterpret_cast<EGLSurface>(1));
     assert(interp.telemetrySnapshot().activeMultiplier == 4);
     assert(mockFpsModFrameCount.load() == 3);
+    const int fps4x = mockFpsModCurrentFps.load();
+    assert(fps4x > fps3x);
 
     // Verify 100% of Minecraft's GL state was restored by GlStateGuard
     assert(mock_runtime::gGl.currentProgram == 77);

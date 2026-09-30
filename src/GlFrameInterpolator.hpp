@@ -50,6 +50,7 @@ private:
 class GlFrameInterpolator {
 public:
     using EglSwapBuffersFn = EGLBoolean(EGLAPIENTRY *)(EGLDisplay, EGLSurface);
+    using EglSwapIntervalFn = EGLBoolean(EGLAPIENTRY *)(EGLDisplay, EGLint);
     using EglPresentationTimeFn =
         EGLBoolean(EGLAPIENTRY *)(EGLDisplay, EGLSurface, std::int64_t);
     using PostFrameCallback =
@@ -86,7 +87,9 @@ public:
     void setSwapCallbacksForTest(
         EglSwapBuffersFn origSwap,
         EglPresentationTimeFn presentationTimeFn = nullptr) noexcept;
-    void setInbuiltFpsCounterForTest(std::atomic<int> *counter) noexcept;
+    void setInbuiltFpsCounterForTest(
+        std::atomic<int> *frameCountPtr,
+        std::atomic<int> *currentFpsPtr = nullptr) noexcept;
     [[nodiscard]] static std::atomic<int> *decodeArm64InbuiltFpsFrameCount(
         const void *nativeGetFpsAddr) noexcept;
 
@@ -118,7 +121,9 @@ private:
 
     pl::memory::HookHandle mSwapHook;
     EglSwapBuffersFn mOrigSwapBuffers = nullptr;
+    EglSwapIntervalFn mSwapIntervalFn = nullptr;
     EglPresentationTimeFn mPresentationTimeFn = nullptr;
+    EGLSurface mLastUncappedSurface = EGL_NO_SURFACE;
 
     // OpenGL ES state (owned by the render thread)
     bool mGlInitialized = false;
@@ -146,7 +151,8 @@ private:
     std::uint32_t mStationaryFrameStreak = 0;
 
     std::atomic<int> *mInbuiltFpsFrameCount = nullptr;
-    bool mInbuiltFpsResolveAttempted = false;
+    std::atomic<int> *mInbuiltCurrentFps = nullptr;
+    std::uint32_t mInbuiltFpsResolveCooldown = 0;
 };
 
 } // namespace framegen

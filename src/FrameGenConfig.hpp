@@ -13,7 +13,7 @@ inline constexpr const char *kModId = "leviframegen";
 inline constexpr const char *kModuleId = "leviframegen.module";
 inline constexpr const char *kHudElementId = "leviframegen.hud_card";
 inline constexpr const char *kModName = "LeviFrameGen";
-inline constexpr const char *kModVersion = "2.2.0";
+inline constexpr const char *kModVersion = "2.3.0";
 inline constexpr const char *kModAuthor = "ballrightmohab-png";
 
 // Configuration keys exposed to LeviLauncher Mod Menu (V1 & V2)

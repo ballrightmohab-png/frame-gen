@@ -31,8 +31,12 @@ FrameGenMod &FrameGenMod::instance() noexcept {
 }
 
 bool FrameGenMod::load(pl::mod::ModContext &context) {
+    JavaVM *vm = context.javaVm();
     {
         std::lock_guard<std::mutex> lock(mMutex);
+        if (vm != nullptr) {
+            mJavaVm = vm;
+        }
         if (!context.id().empty()) {
             mModId = context.id();
         } else {
@@ -57,6 +61,7 @@ bool FrameGenMod::load(pl::mod::ModContext &context) {
     CameraSmoother::instance().updateConfig(initialCfg, true);
     GlFrameInterpolator::instance().updateConfig(initialCfg);
     GlFrameInterpolator::instance().setModuleEnabled(true);
+    HudRenderer::optimizeAndroidHudAndOverlays(vm, initialCfg, true);
 
     pl::input::registerKeyCallback(&FrameGenMod::onKeyEvent);
 
@@ -67,8 +72,14 @@ bool FrameGenMod::load(pl::mod::ModContext &context) {
 }
 
 bool FrameGenMod::enable(pl::mod::ModContext &context) {
+    JavaVM *vm = context.javaVm();
     {
         std::lock_guard<std::mutex> lock(mMutex);
+        if (vm != nullptr) {
+            mJavaVm = vm;
+        } else {
+            vm = mJavaVm;
+        }
         if (!context.id().empty()) {
             mModId = context.id();
         }
@@ -88,6 +99,7 @@ bool FrameGenMod::enable(pl::mod::ModContext &context) {
     CameraSmoother::instance().updateConfig(cfg, true);
     GlFrameInterpolator::instance().updateConfig(cfg);
     GlFrameInterpolator::instance().setModuleEnabled(true);
+    HudRenderer::optimizeAndroidHudAndOverlays(vm, cfg, true);
 
     std::string ownerModId;
     {
@@ -261,11 +273,18 @@ void FrameGenMod::cyclePresetInGame() {
 }
 
 void FrameGenMod::syncSubsystemsAndPersist(bool refreshSchema) {
-    const FrameGenConfig cfg = configSnapshot();
+    FrameGenConfig cfg;
+    JavaVM *vm = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(mMutex);
+        cfg = mConfig;
+        vm = mJavaVm;
+    }
     const bool enabled = mModuleEnabled.load(std::memory_order_relaxed);
 
     CameraSmoother::instance().updateConfig(cfg, enabled);
     GlFrameInterpolator::instance().updateConfig(cfg);
+    HudRenderer::optimizeAndroidHudAndOverlays(vm, cfg, enabled);
 
     RuntimeTelemetrySnapshot telemetry =
         GlFrameInterpolator::instance().telemetrySnapshot();
@@ -293,8 +312,7 @@ void FrameGenMod::onFramePresented(const RuntimeTelemetrySnapshot &telemetry) {
         mLastHudPublishNs.load(std::memory_order_relaxed);
     if (lastHud == 0 || (now - lastHud) >= kHudUpdateIntervalNs) {
         mLastHudPublishNs.store(now, std::memory_order_relaxed);
-        if (telemetry.moduleEnabled && cfg.showHud &&
-            !cfg.clearScreenOverlays) {
+        if (telemetry.moduleEnabled && cfg.showHud) {
             HudRenderer::publishHud(cfg, telemetry);
         }
     }

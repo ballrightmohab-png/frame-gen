@@ -1,7 +1,10 @@
 #include "HudRenderer.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
+#include <mutex>
+#include <string>
 
 #include <dlfcn.h>
 
@@ -76,8 +79,16 @@ std::vector<pl::modmenu::DrawCommand> HudRenderer::buildDrawCommands(
     float cardH = 84.0f;
     cardDimensionsForStyle(config.hudStyle, cardW, cardH);
 
-    const float x = std::clamp(config.hudPosX, 0.0f, 4096.0f);
-    const float y = std::clamp(config.hudPosY, 0.0f, 4096.0f);
+    float x = std::clamp(config.hudPosX, 0.0f, 4096.0f);
+    float y = std::clamp(config.hudPosY, 0.0f, 4096.0f);
+
+    // Never allow the HUD card to sit in the middle of the screen over the
+    // crosshair (e.g. if LeviLaunchroid's resetAllPositionsToCenter was called).
+    if (config.clearScreenOverlays && x > 180.0f && x < 1740.0f &&
+        y > 100.0f && y < 980.0f) {
+        x = 16.0f;
+        y = 16.0f;
+    }
 
     const std::uint32_t bgAlpha = static_cast<std::uint32_t>(
         std::clamp((config.hudOpacity * 255) / 100, 40, 245));
@@ -224,17 +235,23 @@ pl::modmenu::HudEditorElement HudRenderer::buildHudEditorElement(
 void HudRenderer::publishHud(
     const FrameGenConfig &config,
     const RuntimeTelemetrySnapshot &telemetry) noexcept {
-    if (!telemetry.moduleEnabled || !config.showHud ||
-        config.clearScreenOverlays) {
+    if (!telemetry.moduleEnabled || !config.showHud) {
         clearHud();
         return;
     }
     const auto cmds = buildDrawCommands(config, telemetry);
     pl::modmenu::submitDrawCommands(kModuleId, cmds);
 
-    const pl::modmenu::HudEditorElement elem = buildHudEditorElement(config);
-    const pl::modmenu::HudEditorElement elems[1] = {elem};
-    trySubmitHudEditorElementsDynamic(kModuleId, elems);
+    // Do not submit HudEditorElements when clearScreenOverlays is active so
+    // LeviLaunchroid never draws a green center-screen selection box.
+    if (config.clearScreenOverlays) {
+        const std::vector<pl::modmenu::HudEditorElement> emptyElems;
+        trySubmitHudEditorElementsDynamic(kModuleId, emptyElems);
+    } else {
+        const pl::modmenu::HudEditorElement elem = buildHudEditorElement(config);
+        const pl::modmenu::HudEditorElement elems[1] = {elem};
+        trySubmitHudEditorElementsDynamic(kModuleId, elems);
+    }
 }
 
 void HudRenderer::clearHud() noexcept {
@@ -253,6 +270,380 @@ void HudRenderer::clearHud() noexcept {
     }
 #else
     pl::modmenu::unregisterButton("leviframegen.quick_button");
+#endif
+}
+
+void HudRenderer::optimizeAndroidHudAndOverlays(
+    JavaVM *vm, const FrameGenConfig &config, bool moduleEnabled) noexcept {
+#if defined(__ANDROID__)
+    if (vm == nullptr) {
+        return;
+    }
+
+    JNIEnv *env = nullptr;
+    bool attachedHere = false;
+    const jint envState =
+        vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6);
+    if (envState == JNI_EDETACHED) {
+        if (vm->AttachCurrentThread(&env, nullptr) != JNI_OK || env == nullptr) {
+            return;
+        }
+        attachedHere = true;
+    } else if (envState != JNI_OK || env == nullptr) {
+        return;
+    }
+
+    auto clearJniException = [&]() noexcept -> bool {
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            return true;
+        }
+        return false;
+    };
+
+    static std::mutex sJniCacheMutex;
+    static jclass sOverlayMgrClass = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(sJniCacheMutex);
+        if (sOverlayMgrClass == nullptr) {
+            jclass localCls = env->FindClass(
+                "org/levimc/launcher/core/mods/inbuilt/overlay/"
+                "InbuiltOverlayManager");
+            if (!clearJniException() && localCls != nullptr) {
+                sOverlayMgrClass =
+                    static_cast<jclass>(env->NewGlobalRef(localCls));
+                env->DeleteLocalRef(localCls);
+            }
+        }
+    }
+
+    // 1. Pre-populate and sanitize SharedPreferences("inbuilt_mods_prefs")
+    // so LeviLaunchroid's InbuiltOverlayManager NEVER spawns overlays in the
+    // middle of the screen at (widthPixels/2 - 26dp, heightPixels/2 - 26dp).
+    if (moduleEnabled &&
+        (config.clearScreenOverlays ||
+         config.hudOptimizerMode != HudOptimizerMode::Off)) {
+        jclass atCls = env->FindClass("android/app/ActivityThread");
+        if (!clearJniException() && atCls != nullptr) {
+            jmethodID curAppMid = env->GetStaticMethodID(
+                atCls, "currentApplication", "()Landroid/app/Application;");
+            if (!clearJniException() && curAppMid != nullptr) {
+                jobject app = env->CallStaticObjectMethod(atCls, curAppMid);
+                if (!clearJniException() && app != nullptr) {
+                    jclass ctxCls = env->GetObjectClass(app);
+                    jmethodID getResMid = env->GetMethodID(
+                        ctxCls, "getResources",
+                        "()Landroid/content/res/Resources;");
+                    jmethodID getPrefsMid = env->GetMethodID(
+                        ctxCls, "getSharedPreferences",
+                        "(Ljava/lang/String;I)Landroid/content/"
+                        "SharedPreferences;");
+
+                    int screenW = 1920;
+                    int screenH = 1080;
+                    float density = 2.75f;
+
+                    if (!clearJniException() && getResMid != nullptr) {
+                        jobject res = env->CallObjectMethod(app, getResMid);
+                        if (!clearJniException() && res != nullptr) {
+                            jclass resCls = env->GetObjectClass(res);
+                            jmethodID getDmMid = env->GetMethodID(
+                                resCls, "getDisplayMetrics",
+                                "()Landroid/util/DisplayMetrics;");
+                            if (!clearJniException() && getDmMid != nullptr) {
+                                jobject dm =
+                                    env->CallObjectMethod(res, getDmMid);
+                                if (!clearJniException() && dm != nullptr) {
+                                    jclass dmCls = env->GetObjectClass(dm);
+                                    jfieldID wFid = env->GetFieldID(
+                                        dmCls, "widthPixels", "I");
+                                    jfieldID hFid = env->GetFieldID(
+                                        dmCls, "heightPixels", "I");
+                                    jfieldID dFid =
+                                        env->GetFieldID(dmCls, "density", "F");
+                                    if (!clearJniException() &&
+                                        wFid != nullptr && hFid != nullptr &&
+                                        dFid != nullptr) {
+                                        const int rawW =
+                                            env->GetIntField(dm, wFid);
+                                        const int rawH =
+                                            env->GetIntField(dm, hFid);
+                                        const float rawD =
+                                            env->GetFloatField(dm, dFid);
+                                        if (rawW > 0 && rawH > 0) {
+                                            screenW = std::max(rawW, rawH);
+                                            screenH = std::min(rawW, rawH);
+                                        }
+                                        if (rawD > 0.5f && rawD < 10.0f) {
+                                            density = rawD;
+                                        }
+                                    }
+                                    env->DeleteLocalRef(dmCls);
+                                    env->DeleteLocalRef(dm);
+                                }
+                            }
+                            env->DeleteLocalRef(resCls);
+                            env->DeleteLocalRef(res);
+                        }
+                    }
+
+                    if (!clearJniException() && getPrefsMid != nullptr) {
+                        jstring prefsName =
+                            env->NewStringUTF("inbuilt_mods_prefs");
+                        jobject prefs = env->CallObjectMethod(
+                            app, getPrefsMid, prefsName, 0);
+                        env->DeleteLocalRef(prefsName);
+
+                        if (!clearJniException() && prefs != nullptr) {
+                            jclass prefsCls = env->GetObjectClass(prefs);
+                            jmethodID containsMid = env->GetMethodID(
+                                prefsCls, "contains", "(Ljava/lang/String;)Z");
+                            jmethodID getIntMid = env->GetMethodID(
+                                prefsCls, "getInt", "(Ljava/lang/String;I)I");
+                            jmethodID editMid = env->GetMethodID(
+                                prefsCls, "edit",
+                                "()Landroid/content/SharedPreferences$Editor;");
+
+                            if (!clearJniException() && containsMid != nullptr &&
+                                getIntMid != nullptr && editMid != nullptr) {
+                                jobject editor =
+                                    env->CallObjectMethod(prefs, editMid);
+                                if (!clearJniException() && editor != nullptr) {
+                                    jclass editorCls =
+                                        env->GetObjectClass(editor);
+                                    jmethodID putIntMid = env->GetMethodID(
+                                        editorCls, "putInt",
+                                        "(Ljava/lang/String;I)Landroid/content/"
+                                        "SharedPreferences$Editor;");
+                                    jmethodID putBoolMid = env->GetMethodID(
+                                        editorCls, "putBoolean",
+                                        "(Ljava/lang/String;Z)Landroid/content/"
+                                        "SharedPreferences$Editor;");
+                                    jmethodID applyMid = env->GetMethodID(
+                                        editorCls, "apply", "()V");
+
+                                    const int centerX =
+                                        screenW / 2 -
+                                        static_cast<int>(26.0f * density);
+                                    const int centerY =
+                                        screenH / 2 -
+                                        static_cast<int>(26.0f * density);
+                                    const int centerDeadzoneX =
+                                        static_cast<int>(96.0f * density);
+                                    const int centerDeadzoneY =
+                                        static_cast<int>(96.0f * density);
+
+                                    struct EdgeSlot {
+                                        const char *modId;
+                                        int edgeX;
+                                        int edgeY;
+                                    };
+                                    const int leftX =
+                                        static_cast<int>(14.0f * density);
+                                    const int rightX = std::max(
+                                        leftX,
+                                        screenW -
+                                            static_cast<int>(70.0f * density));
+                                    const EdgeSlot slots[] = {
+                                        {"fps_display", leftX,
+                                         static_cast<int>(12.0f * density)},
+                                        {"cps_display", leftX,
+                                         static_cast<int>(42.0f * density)},
+                                        {"quick_drop", leftX,
+                                         static_cast<int>(210.0f * density)},
+                                        {"camera_perspective", leftX,
+                                         static_cast<int>(272.0f * density)},
+                                        {"toggle_hud", leftX,
+                                         static_cast<int>(334.0f * density)},
+                                        {"auto_sprint", leftX,
+                                         static_cast<int>(396.0f * density)},
+                                        {"zoom", rightX,
+                                         static_cast<int>(140.0f * density)},
+                                        {"snaplook", rightX,
+                                         static_cast<int>(202.0f * density)},
+                                        {"virtual_cursor", rightX,
+                                         static_cast<int>(264.0f * density)},
+                                        {"gyro", rightX,
+                                         static_cast<int>(326.0f * density)},
+                                    };
+
+                                    bool modified = false;
+                                    if (!clearJniException() &&
+                                        putIntMid != nullptr &&
+                                        applyMid != nullptr) {
+                                        for (const auto &slot : slots) {
+                                            std::string keyX =
+                                                std::string("overlay_pos_x_") +
+                                                slot.modId;
+                                            std::string keyY =
+                                                std::string("overlay_pos_y_") +
+                                                slot.modId;
+                                            jstring jKeyX =
+                                                env->NewStringUTF(keyX.c_str());
+                                            jstring jKeyY =
+                                                env->NewStringUTF(keyY.c_str());
+
+                                            const jboolean hasX =
+                                                env->CallBooleanMethod(
+                                                    prefs, containsMid, jKeyX);
+                                            const jboolean hasY =
+                                                env->CallBooleanMethod(
+                                                    prefs, containsMid, jKeyY);
+                                            const int curX =
+                                                env->CallIntMethod(
+                                                    prefs, getIntMid, jKeyX,
+                                                    centerX);
+                                            const int curY =
+                                                env->CallIntMethod(
+                                                    prefs, getIntMid, jKeyY,
+                                                    centerY);
+                                            clearJniException();
+
+                                            const bool inCenter =
+                                                (std::abs(curX - centerX) <=
+                                                 centerDeadzoneX) &&
+                                                (std::abs(curY - centerY) <=
+                                                 centerDeadzoneY);
+
+                                            if (!hasX || !hasY || inCenter) {
+                                                jobject r1 =
+                                                    env->CallObjectMethod(
+                                                        editor, putIntMid,
+                                                        jKeyX, slot.edgeX);
+                                                if (r1 != nullptr) {
+                                                    env->DeleteLocalRef(r1);
+                                                }
+                                                jobject r2 =
+                                                    env->CallObjectMethod(
+                                                        editor, putIntMid,
+                                                        jKeyY, slot.edgeY);
+                                                if (r2 != nullptr) {
+                                                    env->DeleteLocalRef(r2);
+                                                }
+                                                clearJniException();
+                                                modified = true;
+                                            }
+
+                                            env->DeleteLocalRef(jKeyX);
+                                            env->DeleteLocalRef(jKeyY);
+                                        }
+
+                                        if (config.clearScreenOverlays &&
+                                            putBoolMid != nullptr) {
+                                            jstring petKey = env->NewStringUTF(
+                                                "inbuilt_mod_enabled_chick_pet");
+                                            jobject rPet =
+                                                env->CallObjectMethod(
+                                                    editor, putBoolMid, petKey,
+                                                    JNI_FALSE);
+                                            if (rPet != nullptr) {
+                                                env->DeleteLocalRef(rPet);
+                                            }
+                                            env->DeleteLocalRef(petKey);
+                                            clearJniException();
+                                            modified = true;
+                                        }
+
+                                        if (modified) {
+                                            env->CallVoidMethod(editor,
+                                                                applyMid);
+                                            clearJniException();
+                                        }
+                                    }
+                                    env->DeleteLocalRef(editorCls);
+                                    env->DeleteLocalRef(editor);
+                                }
+                            }
+                            env->DeleteLocalRef(prefsCls);
+                            env->DeleteLocalRef(prefs);
+                        }
+                    }
+                    env->DeleteLocalRef(ctxCls);
+                    env->DeleteLocalRef(app);
+                }
+            }
+            env->DeleteLocalRef(atCls);
+        }
+    }
+
+    // 2. Runtime Window & HudOverlay optimization if InbuiltOverlayManager is active
+    jclass overlayMgrCls = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(sJniCacheMutex);
+        overlayMgrCls = sOverlayMgrClass;
+    }
+    if (overlayMgrCls != nullptr) {
+        jmethodID getInstMid = env->GetStaticMethodID(
+            overlayMgrCls, "getInstance",
+            "()Lorg/levimc/launcher/core/mods/inbuilt/overlay/"
+            "InbuiltOverlayManager;");
+        if (!clearJniException() && getInstMid != nullptr) {
+            jobject mgr =
+                env->CallStaticObjectMethod(overlayMgrCls, getInstMid);
+            if (!clearJniException() && mgr != nullptr) {
+                // Optimize HudOverlay (elevation=0f, transparent background, and
+                // willNotDraw=true when no external HUD is shown and not in editor)
+                jfieldID hudFid = env->GetFieldID(
+                    overlayMgrCls, "hudOverlay",
+                    "Lorg/levimc/launcher/core/mods/inbuilt/overlay/"
+                    "HudOverlay;");
+                if (!clearJniException() && hudFid != nullptr) {
+                    jobject hudView = env->GetObjectField(mgr, hudFid);
+                    if (!clearJniException() && hudView != nullptr) {
+                        jclass hudCls = env->GetObjectClass(hudView);
+                        jmethodID isEditorMid = env->GetMethodID(
+                            hudCls, "isHudEditorMode", "()Z");
+                        jmethodID setWillNotDrawMid = env->GetMethodID(
+                            hudCls, "setWillNotDraw", "(Z)V");
+                        jmethodID setElevationMid =
+                            env->GetMethodID(hudCls, "setElevation", "(F)V");
+                        jmethodID setBgColorMid = env->GetMethodID(
+                            hudCls, "setBackgroundColor", "(I)V");
+
+                        if (!clearJniException() && isEditorMid != nullptr) {
+                            const jboolean editorActive =
+                                env->CallBooleanMethod(hudView, isEditorMid);
+                            clearJniException();
+                            if (!editorActive) {
+                                if (setBgColorMid != nullptr) {
+                                    env->CallVoidMethod(hudView, setBgColorMid,
+                                                        0x00000000);
+                                    clearJniException();
+                                }
+                                if (setElevationMid != nullptr) {
+                                    env->CallVoidMethod(hudView,
+                                                        setElevationMid, 0.0f);
+                                    clearJniException();
+                                }
+                                if (setWillNotDrawMid != nullptr) {
+                                    const bool skipCanvasDraw =
+                                        moduleEnabled &&
+                                        (config.hudOptimizerMode !=
+                                         HudOptimizerMode::Off) &&
+                                        !config.showHud;
+                                    env->CallVoidMethod(
+                                        hudView, setWillNotDrawMid,
+                                        skipCanvasDraw ? JNI_TRUE : JNI_FALSE);
+                                    clearJniException();
+                                }
+                            }
+                        }
+                        env->DeleteLocalRef(hudCls);
+                        env->DeleteLocalRef(hudView);
+                    }
+                }
+                env->DeleteLocalRef(mgr);
+            }
+        }
+    }
+
+    if (attachedHere) {
+        vm->DetachCurrentThread();
+    }
+#else
+    (void)vm;
+    (void)config;
+    (void)moduleEnabled;
 #endif
 }
 
