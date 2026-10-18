@@ -872,6 +872,15 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
                     mHasFrameHistory = true;
                     swapResult = mOrigSwapBuffers(dpy, surface);
                 } else {
+                    // Fix black screen when holding item + looking east/west: large yaw + item
+                    // causes warp to sample outside and mTexPrev can be stale. Skip warp if large.
+                    const bool isEastWestLargeYaw = std::abs(motion.mvU) > 0.35f || std::abs(motion.mvV) > 0.35f;
+                    const bool isHoldingItemLargeMotion = isEastWestLargeYaw && cfg.hudProtection > 0.5f;
+                    if (isHoldingItemLargeMotion) {
+                        // Don't warp — just show real frame, no black
+                        swapResult = mOrigSwapBuffers(dpy, surface);
+                        std::swap(mTexPrev, mTexCur);
+                    } else {
                     const bool canMultiSwap =
                         (cfg.frameGenMode ==
                          FrameGenMode::MultiSwapInterpolation) &&
@@ -966,6 +975,7 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
                             resetTemporalState();
                         }
                     }
+                    } // end isHoldingItemLargeMotion else
                 }
             }
         }
