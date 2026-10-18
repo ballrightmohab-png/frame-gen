@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(LeviFrameGen VERSION 2.0.0 LANGUAGES CXX)
+project(JNGSFrameGen VERSION 3.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -7,7 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(NOT ANDROID)
     message(STATUS
-        "Configuring LeviFrameGen in host verification mode. "
+        "Configuring JNGS Frame Gen in host verification mode. "
         "For Android arm64-v8a (.levipack), configure with the Android NDK toolchain.")
 endif()
 
@@ -25,7 +25,7 @@ target_include_directories(framegen PRIVATE
     preloader_headers
 )
 
-# Build-time stub of libpreloader.so so libframegen.so records DT_NEEDED
+# Build-time stub of libpreloader.so so libjngsframegen.so records DT_NEEDED
 # libpreloader.so and exact NDK/libc++ mangled undefined pl::* symbols.
 # Do NOT ship libpreloader.so inside the .levipack; LeviLaunchroid injects
 # its own runtime libpreloader.so into the game process.
@@ -92,5 +92,5 @@ target_compile_options(framegen PRIVATE
 
 set_target_properties(framegen PROPERTIES
     LINK_FLAGS "-Wl,--gc-sections"
-    OUTPUT_NAME "framegen"
+    OUTPUT_NAME "jngsframegen"
 )

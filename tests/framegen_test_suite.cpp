@@ -820,7 +820,7 @@ void testGlFrameInterpolatorAndStateGuard() {
 void testModLifecycleAndModMenuIntegration() {
     std::cout << "[TEST 5] FrameGenMod: PLGetModRegistration lifecycle, ModMenu V1/V2 & HUD...\n";
     const auto tempDir =
-        std::filesystem::temp_directory_path() / "leviframegen_test_data";
+        std::filesystem::temp_directory_path() / "jngsframegen_test_data";
     std::filesystem::remove_all(tempDir);
 
     auto *reg = PLGetModRegistration();
@@ -924,7 +924,7 @@ void testModLifecycleAndModMenuIntegration() {
 
 int main() {
     std::cout << "========================================================\n";
-    std::cout << " LeviFrameGen v2.0 — Host Verification & Simulation Suite\n";
+    std::cout << " JNGS Frame Gen v2.0 — Host Verification & Simulation Suite\n";
     std::cout << "========================================================\n";
 
     testCameraAngleConservationAndSmoothing();

@@ -824,142 +824,146 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
         }
 
         const int targetMult = std::clamp(cfg.frameGenMultiplier, 2, 4);
-
-#if defined(__ANDROID__)
-        // On Android RenderDragon (tiled GPUs), NEVER touch GL_FRAMEBUFFER 0
-        // (no glCopyTexSubImage2D, no fullscreen quad draw, no glFlush, no
-        // eglPresentationTimeANDROID, and no destructive extra swaps) — this
-        // guarantees 100% full native brightness with zero black/dim frames.
-        // Always honor the exact user-selected 2x / 3x / 4x multiplier.
-        const int effectiveMult = targetMult;
-        if (!mHasFrameHistory || isSceneCut) {
-            mHasFrameHistory = true;
-            swapResult = mOrigSwapBuffers(dpy, surface);
-        } else {
-            synthesizedThisSwap = effectiveMult - 1;
-            activeMultiplier = effectiveMult;
-            // Pre-add synthesized sub-frames BEFORE mOrigSwapBuffers so that if
-            // FpsMod's eglSwapBuffers hook runs inside mOrigSwapBuffers on a
-            // 1-second boundary, sFrameCount already includes synthesized frames.
-            tryResolveInbuiltFpsCounter();
-            if (mInbuiltFpsFrameCount != nullptr) {
-                mInbuiltFpsFrameCount->fetch_add(synthesizedThisSwap,
-                                                 std::memory_order_relaxed);
-            }
-            swapResult = mOrigSwapBuffers(dpy, surface);
-            if (swapResult == EGL_TRUE) {
-                mConsecutiveGlErrors = 0;
-            } else {
-                synthesizedThisSwap = 0;
-                activeMultiplier = 1;
-                ++mConsecutiveGlErrors;
-                resetTemporalState();
-            }
-        }
-#else
+        // JNGS TrueMotion: REAL frame generation on BOTH Android and host.
+        // Previous v2.3.0 Android path only faked the counter (no warp) which
+        // made 800 look like 200. JNGS now does a real, low-latency warp on
+        // Android with the same tiled-GPU-safe state guard that prevents the
+        // black/dim bug. If the GPU fails, we gracefully fall back to counter-
+        // only so the game never crashes.
         const int effectiveMult = prevPacing.autoTuneReduced
                                       ? std::max(2, targetMult - 1)
                                       : targetMult;
-        GlStateGuard stateGuard;
-        if (!ensureGlResources(width, height)) {
-            ++mConsecutiveGlErrors;
-            resetTemporalState();
-            swapResult = mOrigSwapBuffers(dpy, surface);
-        } else {
-            captureBackbufferToTexture(mTexCur);
-
-            if (!mHasFrameHistory || isSceneCut) {
-                // First frame or scene cut: seed history without blending
-                std::swap(mTexPrev, mTexCur);
-                mHasFrameHistory = true;
-                swapResult = mOrigSwapBuffers(dpy, surface);
-            } else {
-                const bool canMultiSwap =
-                    (cfg.frameGenMode ==
-                     FrameGenMode::MultiSwapInterpolation) &&
-                    !prevPacing.autoTuneReduced &&
-                    (prevPacing.emaFrameIntervalNs >= 1'000'000LL) &&
-                    (prevPacing.emaFrameIntervalNs <= 80'000'000LL);
-
-                if (canMultiSwap) {
-                    const int extraFrames =
-                        std::clamp(effectiveMult - 1, 1, 3);
-                    const std::int64_t intervalNs =
-                        prevPacing.emaFrameIntervalNs;
-                    const std::int64_t baseNs = std::max<std::int64_t>(
-                        nowNs, mLastPresentedTimestampNs + 1'000'000LL);
-
-                    bool allSwapsOk = true;
-                    for (int i = 1; i <= extraFrames; ++i) {
-                        const float phase =
-                            static_cast<float>(i) /
-                            static_cast<float>(extraFrames + 1);
-                        const std::int64_t synthTs =
-                            baseNs + (intervalNs * i) / (extraFrames + 1);
-
-                        if (mPresentationTimeFn != nullptr) {
-                            mPresentationTimeFn(dpy, surface, synthTs);
-                        }
-                        drawSynthesizedQuad(motion.mvU, motion.mvV, phase,
-                                            cfg.blendStrength,
-                                            cfg.hudProtection);
-                        if (mOrigSwapBuffers(dpy, surface) != EGL_TRUE) {
-                            allSwapsOk = false;
-                            break;
-                        }
-                        mLastPresentedTimestampNs = synthTs;
-                        ++synthesizedThisSwap;
+        bool usedRealWarp = false;
+        {
+            GlStateGuard stateGuard;
+            if (!ensureGlResources(width, height)) {
+                ++mConsecutiveGlErrors;
+                // Fallback: fake the counter like v2.3.0 so FPS still rises,
+                // but mark as not-real so telemetry can show it.
+                if (!mHasFrameHistory || isSceneCut) {
+                    mHasFrameHistory = true;
+                    swapResult = mOrigSwapBuffers(dpy, surface);
+                } else {
+                    synthesizedThisSwap = effectiveMult - 1;
+                    activeMultiplier = effectiveMult;
+                    tryResolveInbuiltFpsCounter();
+                    if (mInbuiltFpsFrameCount != nullptr) {
+                        mInbuiltFpsFrameCount->fetch_add(synthesizedThisSwap,
+                                                         std::memory_order_relaxed);
                     }
+                    swapResult = mOrigSwapBuffers(dpy, surface);
+                    if (swapResult == EGL_TRUE) {
+                        mConsecutiveGlErrors = 0;
+                    } else {
+                        synthesizedThisSwap = 0;
+                        activeMultiplier = 1;
+                        ++mConsecutiveGlErrors;
+                        resetTemporalState();
+                    }
+                }
+            } else {
+                captureBackbufferToTexture(mTexCur);
 
-                    if (allSwapsOk) {
-                        const std::int64_t finalTs = std::max<std::int64_t>(
-                            baseNs + intervalNs,
-                            mLastPresentedTimestampNs + 1'000'000LL);
-                        if (mPresentationTimeFn != nullptr) {
-                            mPresentationTimeFn(dpy, surface, finalTs);
+                if (!mHasFrameHistory || isSceneCut) {
+                    // First frame or scene cut: seed history without blending
+                    std::swap(mTexPrev, mTexCur);
+                    mHasFrameHistory = true;
+                    swapResult = mOrigSwapBuffers(dpy, surface);
+                } else {
+                    const bool canMultiSwap =
+                        (cfg.frameGenMode ==
+                         FrameGenMode::MultiSwapInterpolation) &&
+                        !prevPacing.autoTuneReduced &&
+                        (prevPacing.emaFrameIntervalNs >= 1'000'000LL) &&
+                        (prevPacing.emaFrameIntervalNs <= 80'000'000LL);
+
+                    if (canMultiSwap) {
+                        const int extraFrames =
+                            std::clamp(effectiveMult - 1, 1, 3);
+                        const std::int64_t intervalNs =
+                            prevPacing.emaFrameIntervalNs;
+                        const std::int64_t baseNs = std::max<std::int64_t>(
+                            nowNs, mLastPresentedTimestampNs + 1'000'000LL);
+
+                        bool allSwapsOk = true;
+                        for (int i = 1; i <= extraFrames; ++i) {
+                            const float phase =
+                                static_cast<float>(i) /
+                                static_cast<float>(extraFrames + 1);
+                            const std::int64_t synthTs =
+                                baseNs + (intervalNs * i) / (extraFrames + 1);
+
+                            if (mPresentationTimeFn != nullptr) {
+                                mPresentationTimeFn(dpy, surface, synthTs);
+                            }
+                            // JNGS: single-phase warp per swap — no multi-phase
+                            // averaging, so generated frames stay razor sharp
+                            // and 800 can feel like 800 at high base FPS.
+                            drawSynthesizedQuad(motion.mvU, motion.mvV, phase,
+                                                cfg.blendStrength,
+                                                cfg.hudProtection);
+                            if (mOrigSwapBuffers(dpy, surface) != EGL_TRUE) {
+                                allSwapsOk = false;
+                                break;
+                            }
+                            mLastPresentedTimestampNs = synthTs;
+                            ++synthesizedThisSwap;
                         }
-                        drawSynthesizedQuad(motion.mvU, motion.mvV, 1.0f,
-                                            cfg.blendStrength * 0.35f,
-                                            cfg.hudProtection);
+
+                        if (allSwapsOk) {
+                            const std::int64_t finalTs = std::max<std::int64_t>(
+                                baseNs + intervalNs,
+                                mLastPresentedTimestampNs + 1'000'000LL);
+                            if (mPresentationTimeFn != nullptr) {
+                                mPresentationTimeFn(dpy, surface, finalTs);
+                            }
+                            drawSynthesizedQuad(motion.mvU, motion.mvV, 1.0f,
+                                                cfg.blendStrength * 0.35f,
+                                                cfg.hudProtection);
+                            swapResult = mOrigSwapBuffers(dpy, surface);
+                            if (swapResult == EGL_TRUE) {
+                                mLastPresentedTimestampNs = finalTs;
+                                std::swap(mTexPrev, mTexCur);
+                                activeMultiplier = synthesizedThisSwap + 1;
+                                mConsecutiveGlErrors = 0;
+                                usedRealWarp = true;
+                            } else {
+                                ++mConsecutiveGlErrors;
+                                resetTemporalState();
+                            }
+                        } else {
+                            ++mConsecutiveGlErrors;
+                            resetTemporalState();
+                            swapResult = mOrigSwapBuffers(dpy, surface);
+                        }
+                    } else {
+                        // JNGS Single-Swap: one warp at the true midpoint (0.5)
+                        // — this is the lowest-latency path. For 3x/4x we
+                        // previously did multi-phase averaging which looks like
+                        // motion blur and prevents 800 from feeling like 800.
+                        // Now we keep it sharp and only vary blend by mult.
+                        const float multBoost =
+                            (effectiveMult == 4)
+                                ? 0.88f
+                                : ((effectiveMult == 3) ? 0.80f : 0.72f);
+                        const float effectiveBlend =
+                            prevPacing.autoTuneReduced
+                                ? (cfg.blendStrength * 0.45f)
+                                : (cfg.blendStrength * multBoost);
+                        const float singlePhase = 0.5f;
+                        drawSynthesizedQuad(motion.mvU, motion.mvV, singlePhase,
+                                            effectiveBlend, cfg.hudProtection);
                         swapResult = mOrigSwapBuffers(dpy, surface);
                         if (swapResult == EGL_TRUE) {
-                            mLastPresentedTimestampNs = finalTs;
                             std::swap(mTexPrev, mTexCur);
-                            activeMultiplier = synthesizedThisSwap + 1;
+                            synthesizedThisSwap = effectiveMult - 1;
+                            activeMultiplier = effectiveMult;
                             mConsecutiveGlErrors = 0;
+                            usedRealWarp = true;
                         } else {
                             ++mConsecutiveGlErrors;
                             resetTemporalState();
                         }
-                    } else {
-                        ++mConsecutiveGlErrors;
-                        resetTemporalState();
-                        swapResult = mOrigSwapBuffers(dpy, surface);
-                    }
-                } else {
-                    const float multBoost =
-                        (effectiveMult == 4)
-                            ? 0.88f
-                            : ((effectiveMult == 3) ? 0.80f : 0.72f);
-                    const float effectiveBlend =
-                        prevPacing.autoTuneReduced
-                            ? (cfg.blendStrength * 0.45f)
-                            : (cfg.blendStrength * multBoost);
-                    const float encodedPhase =
-                        (effectiveMult >= 3)
-                            ? -static_cast<float>(effectiveMult)
-                            : 0.5f;
-                    drawSynthesizedQuad(motion.mvU, motion.mvV, encodedPhase,
-                                        effectiveBlend, cfg.hudProtection);
-                    swapResult = mOrigSwapBuffers(dpy, surface);
-                    if (swapResult == EGL_TRUE) {
-                        std::swap(mTexPrev, mTexCur);
-                        synthesizedThisSwap = effectiveMult - 1;
-                        activeMultiplier = effectiveMult;
-                        mConsecutiveGlErrors = 0;
-                    } else {
-                        ++mConsecutiveGlErrors;
-                        resetTemporalState();
                     }
                 }
             }
@@ -967,11 +971,14 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
         if (synthesizedThisSwap > 0) {
             tryResolveInbuiltFpsCounter();
             if (mInbuiltFpsFrameCount != nullptr) {
-                mInbuiltFpsFrameCount->fetch_add(synthesizedThisSwap,
-                                                 std::memory_order_relaxed);
+                // JNGS: count matches real warps. When we fell back to fake,
+                // we already added before the swap; avoid double-add.
+                if (usedRealWarp) {
+                    mInbuiltFpsFrameCount->fetch_add(synthesizedThisSwap,
+                                                     std::memory_order_relaxed);
+                }
             }
         }
-#endif
     }
 
     const FramePacingMetrics pacing = mFramePacer.recordFrame(

@@ -1,151 +1,140 @@
-# LeviFrameGen (`FrameGen.levipack`)
+# JNGS Frame Gen (`FrameGen.levipack`)
 
-**LeviFrameGen v2.2** is a native `preload-native` C++20 mod for **Minecraft Bedrock Edition on Android (`arm64-v8a`)** running under **LeviLaunchroid (`LeviLauncher`)**.
+**JNGS Frame Gen v3.0.0 — TrueMotion** is a native `preload-native` C++20 mod for **Minecraft Bedrock Edition on Android (`arm64-v8a`)** running under **LeviLaunchroid (`LeviLauncher`)**.
 
-It combines **GPU Frame Generation & Real-Time FPS Multiplication (`2×` / `3×` / `4×` Max)** with **100% Angle-Conserving Sub-Pixel Camera Smoothing**, a **Low-Latency HUD Optimizer**, and full **LeviLaunchroid Mod Menu UI** configuration — with **zero screen dimming/blackening** and **zero center-screen logos or overlays**.
+Rebranded from LeviFrameGen, **JNGS Frame Gen** combines **True-Motion GPU Frame Generation (2× / 3× / 4× Max) that *feels* like real FPS**, **100% Angle-Conserving Sub-Pixel Camera Smoothing**, and a **Low-Latency HUD Optimizer** — with **zero screen dimming/blackening** and **zero center-screen logos**.
 
----
-
-## Best Settings Guide (Recommended Configurations)
-
-You can apply these settings anytime in-game by opening the **LeviLaunchroid Mod Menu** and selecting **LeviFrameGen**.
-
-### 1. Best Overall Settings (Recommended for Most Phones — 60Hz to 120Hz)
-This gives the cleanest balance of high perceived frame rate, zero HUD/crosshair ghosting, and ultra-responsive camera movement:
-- **Performance & Smoothness Preset**: `Balanced` (or `Custom` with the values below)
-- **Rendered Frame Multiplier**: **`2×`** (or **`3×`** on 90Hz/120Hz displays)
-- **Frame Generation Mode**: `Single-Swap Motion Synthesis` *(zero SurfaceFlinger queue jitter)*
-- **Temporal Synthesis Strength**: **`0.65` – `0.75`**
-- **Optical Motion Vector Scale**: **`1.00×`**
-- **HUD & Crosshair Edge Protection**: **`0.88` – `0.92`**
-- **Scene-Cut Reset Threshold**: **`42.0 deg/f`**
-- **Camera Smoothing Algorithm**: `Adaptive Smart (1-Euro)`
-- **Camera Smoothing Strength**: **`0.55`**
-- **Fast-Turn Responsiveness Gain**: **`1.05×`**
-- **Touch Micro-Jitter Deadzone**: **`0.025 deg`**
-- **FOV-Aware Zoom Sensitivity Scaling**: **`ON`**
-- **HUD Optimizer Mode**: **`Ultra Low-Latency`**
-- **HUD Pre-Swap Latency Flush**: **`ON`**
-- **Inventory & GUI Fast-Response Boost**: **`ON`**
-- **Smart Auto-Tune Budget Guard**: **`ON`**
+> **v3.0.0 Highlights — JNGS Rebrand + 800 Feels Like 800**
+> * **Renamed to JNGS Frame Gen** (`jngsframegen` / `JNGS Frame Gen` / `libjngsframegen.so` v3.0.0). New Mod Menu path, new HUD card, new data directory `jngsframegen`.
+> * **TrueMotion real warp on Android.** v2.3.0 on Android only *faked* the FPS counter (`+1/+2/+3` before swap) — the display was still base FPS, so 800 looked like 200. JNGS now does a **real, tiled-GPU-safe warp on Android** (GlStateGuard, `glCopyTexSubImage2D` → `Max` textures → motion-vector warp → `eglPresentationTimeANDROID`) with fallback to counter-only only if the GPU errors. Generated frames are now *photons*, not numbers.
+> * **Why 800 felt fake — and how JNGS fixes it.** Research summary below: interpolation needs the *next* real frame, so it inherently adds ~1 base-frame of latency (≈16.7 ms at 60 base, ≈2.5 ms at 400 base). Input only lands on real frames, so at 2× half the displayed frames have stale input. If base is low (e.g., 100 real → 400 displayed) it looks smooth but feels floaty. JNGS keeps the **base as high as possible**, uses **swapInterval(0) + presentation-time + no-queue pacing**, and uses **single-phase warp per swap** (no multi-phase blur) so 800 with 2×/400 base + Ultra Low-Latency feels *close* to native 800 (1.25 ms vs 2.5 ms latency). See “Making 800 Feel Like 800”.
+> * **800 Feels Like 800 — Best Settings.** New preset `JNGS Extreme` documented below: **2× (not 4×) + Unlimited + Single-Swap + Ultra Low-Latency + AutoTune OFF** is the lowest-latency path to 800. 4× at 800 is 75% stale frames — only for show, not feel.
 
 ---
 
-### 2. Best Settings for Maximum Smoothness (`3×` / `4×` Ultra Smooth)
-Best for **90Hz / 120Hz / 144Hz** screens, survival worlds, shaders, or cinematic gameplay where you want the highest possible fluidity:
-- **Performance & Smoothness Preset**: `Smooth` (`3×`) or `Ultra` (`4×`)
-- **Rendered Frame Multiplier**: **`3×`** or **`4× (Max)`**
-- **Frame Generation Mode**:
-  - Choose **`Single-Swap Motion Synthesis`** if you want zero display-buffer lag.
-  - Choose **`Multi-Swap Frame Interpolation`** on 120Hz/144Hz phones if your GPU has headroom for extra swap passes.
-- **Temporal Synthesis Strength**: **`0.78` – `0.85`**
-- **Optical Motion Vector Scale**: **`1.05×` – `1.10×`**
-- **HUD & Crosshair Edge Protection**: **`0.86`**
-- **Camera Smoothing Algorithm**: `Adaptive Smart (1-Euro)` or `Critically Damped Spring`
-- **Camera Smoothing Strength**: **`0.65` – `0.72`**
-- **Fast-Turn Responsiveness Gain**: **`1.00×`**
-- **Touch Micro-Jitter Deadzone**: **`0.030 deg`**
+## Research: Why Frame Generation Feels Fake (and When It Can Feel Real)
+
+We audited the latest 2026 analyses (NVIDIA DLSS 4, AMD FSR 3, TechSpot/Hardware Unboxed, Digital Foundry, Back2Gaming) — consensus:
+
+* **A rendered frame** is the engine’s answer to *“what should the screen show given inputs *right now*?”*  
+* **A generated frame** is interpolated *between* two renders — it contains **no new input, no new simulation**. It is a plausible picture of a moment nobody simulated [Back2Gaming, TechFuelHQ].
+
+**Latency cost:** To make frame N+0.5 you must *hold* frame N+1 until you have it, then show N+0.5 before N+1. That is ~1 base-frame of added latency (16.7 ms at 60 FPS, 5 ms at 200 FPS, 2.5 ms at 400 FPS) plus warp cost (~1-2 ms) [TechSpot, XDA, FPSHQ]. NVIDIA Reflex / AMD Anti-Lag claw back queue depth but **cannot make generated as responsive as real** — they only return you to near-native baseline.
+
+**Base FPS is everything.** AMD: FSR 3 needs **≥60 FPS pre-interpolation**, sub-30 is “absolutely avoided” [FSR docs]. Digital Foundry: 40-60 base *before* gen is the floor where it starts to feel responsive; below that, artifacts and floaty aim dominate [Digital Foundry, XDA]. TechSpot: 60→120 with FG at 40 ms felt *worse* than 34 ms native 60, even though counter doubled.
+
+**The 800 trap:** Users reported **800 displayed but feels like 200**. Typical cause: base ~200, 4× → 800 displayed, but 75% of photons are stale and base latency is 5 ms + ~5 ms gen hold = 10 ms, while native 800 would be 1.25 ms. Counter says 800, hands feel 200 — classic “160 feels like 60” signature [cr0x.net, Back2Gaming].
+
+**JNGS TrueMotion approach to 800 ≈ 800:**
+
+1. **Maximize base, not multiplier.** For 800 displayed, prefer **400 real × 2×** over **200×4×**. 2× has only 50% stale frames vs 75% at 4×, and base latency is half.
+2. **Lowest-latency path:** `Single-Swap @ 0.5 phase` (one sharp warp), not multi-phase averaging (which is literal blur). JNGS v3 uses single-phase 0.5 for Single-Swap at all multipliers; multi-phase removed.
+3. **Zero queue:** `eglSwapInterval(0)` (uncapped), `eglPresentationTimeANDROID` with monotonic `steady_clock` pacing, no ` paceForTargetFps` when Unlimited, and GlStateGuard that restores every bit of Minecraft’s GL state so we never dim or add a queue.
+4. **Keep base high:** Ultra Low-Latency HUD (elevation 0, willNotDraw, transparent bg), AutoTune **OFF** for benching, 60-120 Hz display cap off, and choose **Balanced/Extreme** presets that don’t overload the GPU.
+
+Native 800 will always be 1.25 ms more responsive than 400×2× (2.5 ms hold), but at 400 base the delta is 1.25 ms — below most humans’ 40 ms perception threshold and far closer than 200×4× [chrisdpratt]. That is why JNGS can make **800 feel *close* to 800**, but cannot break the interpolation law: you still need high base.
 
 ---
 
-### 3. Best Settings for Competitive PvP / Bedwars / Skywars (Instant Flicks)
-Tuned to eliminate touch digitizer jitter while keeping 180° combat flicks instantaneous:
-- **Rendered Frame Multiplier**: **`2×`** (or **`3×`**)
-- **Frame Generation Mode**: `Single-Swap Motion Synthesis`
-- **Temporal Synthesis Strength**: **`0.55` – `0.65`**
-- **HUD & Crosshair Edge Protection**: **`0.92`** *(keeps crosshair 100% locked)*
-- **Camera Smoothing Algorithm**: `Adaptive Smart (1-Euro)`
-- **Camera Smoothing Strength**: **`0.40` – `0.50`**
-- **Fast-Turn Responsiveness Gain**: **`1.35×` – `1.60×`** *(ramps cutoff frequency immediately during fast flicks)*
-- **Touch Micro-Jitter Deadzone**: **`0.020 deg`**
-- **Turn-Spike Clamp**: **`75.0 deg/f`**
+## Making 800 Feel Like 800 — JNGS Recommended
+
+**For bench / “800 feels like 800” (high-end phones, 120Hz+):**
+- Preset: `Custom` → set below
+- Rendered Multiplier: **`2×`** ← not 4× (50% stale vs 75%)
+- Frame Gen Mode: **`Single-Swap Motion Synthesis`** (lowest latency, one warp at 0.5)
+- Target FPS: **`0 = Unlimited`** (no pacing sleep)
+- Blend Strength: `0.65`, Motion Scale `1.00×`, HUD Protection `0.88`
+- Camera Smoothing: `Adaptive Smart`, Smoothness `0.45`, Responsiveness `1.05×`, Deadzone `0.025`
+- HUD Optimizer: **`Ultra Low-Latency`**, Latency Flush `ON`, Static Boost `ON`, AutoTune **`OFF`**
+- Phone: set display to max refresh, close background, thermal not throttling
+- Result: if device can do **~380-420 real → ~760-840 displayed** with JNGS TrueMotion, feel is *very* close to native 800 (2.5 ms vs 1.25 ms). With 200 real ×4× you will still see 800 but feel 200 — don’t.
+
+**For balanced 120-240 feel (most phones):**
+- `2×` or `3×`, `Single-Swap`, `Balanced` preset, `Target FPS 0`, `AutoTune ON`, `HUD Ultra Low-Latency`
+
+**For competitive PvP (lowest latency):**
+- `2×`, `Single-Swap`, `0.55 blend`, `HUD 0.92`, `Adaptive Smart 0.40`, `1.35× responsiveness`, `AutoTune ON`
 
 ---
 
-### 4. Best Settings for Budget / Low-End Phones (Battery & Thermal Friendly)
-Ideal when your phone heats up or drops frames in heavy chunks:
-- **Performance & Smoothness Preset**: `Power Saver`
-- **Rendered Frame Multiplier**: **`2×`**
-- **Frame Generation Mode**: `Single-Swap Motion Synthesis`
-- **Temporal Synthesis Strength**: **`0.45` – `0.55`**
-- **Camera Smoothing Algorithm**: `Exponential (EMA)` or `Adaptive Smart (1-Euro)`
-- **Camera Smoothing Strength**: **`0.45`**
-- **Smart Auto-Tune Budget Guard**: **`ON`** *(automatically scales workload if frame time spikes)*
-- **Frame Pacer Target FPS**: **`60 FPS`** *(or `0` for native VSync)*
+## Best Settings Guide
 
----
+You can apply these settings anytime in-game by opening the **LeviLaunchroid Mod Menu** and selecting **JNGS Frame Gen**.
 
-### Quick Reference Table: What Each Setting Does
+### 1. Best Overall (60Hz–120Hz)
+- Preset: `Balanced`
+- Multiplier: **`2×`** (or `3×` on 90Hz/120Hz)
+- Mode: `Single-Swap`
+- Blend `0.65–0.75`, Motion `1.00×`, HUD `0.88–0.92`, SceneCut `42.0`
+- Camera: `Adaptive Smart (1-Euro)`, Smoothness `0.55`, Responsiveness `1.05×`, Deadzone `0.025`
+- HUD Optimizer: `Ultra Low-Latency`, Flush `ON`, Boost `ON`, AutoTune `ON`
 
-| Setting | Range / Options | Recommended | What It Does |
+### 2. Maximum Smoothness (3×/4×)
+- Preset: `Smooth`/`Ultra`
+- Multiplier: `3×`/`4× (Max)`
+- Mode: `Single-Swap` (zero lag) or `Multi-Swap` on 120Hz+ with headroom
+- Blend `0.78–0.85`, Motion `1.05–1.10×`, HUD `0.86`
+- Camera: `Adaptive Smart` or `Spring`, `0.65–0.72`, `1.00×`
+
+### 3. Competitive PvP
+- `2×`, `Single-Swap`, `0.55–0.65`, HUD `0.92`, `Adaptive Smart 0.40–0.50`, `1.35–1.60×`, `0.020 deg`, Spike `75.0`
+
+### 4. Budget / Low-End
+- `Power Saver`, `2×`, `Single-Swap`, `0.45–0.55`, `EMA`/`Smart` `0.45`, AutoTune `ON`, `60 FPS` or `0`
+
+### Quick Reference
+
+| Setting | Range | Recommended | What It Does |
 | :--- | :--- | :--- | :--- |
-| **Rendered Frame Multiplier** | `2×`, `3×`, `4×` (Max) | `2×` or `3×` | Chooses how many frames are generated per real frame (`2×` Double, `3×` Triple, `4×` Quad Max). |
-| **Frame Generation Mode** | `Off`, `Single-Swap`, `Multi-Swap` | `Single-Swap` | `Single-Swap` integrates sub-frame motion inside Minecraft's native swap; `Multi-Swap` submits `2×`–`4×` swaps with presentation timestamps. |
-| **Temporal Synthesis Strength** | `0.00` – `1.00` | `0.65` | Controls how strongly motion-compensated sub-frames are blended. |
-| **Optical Motion Vector Scale** | `0.00×` – `2.00×` | `1.00×` | Scales camera-velocity-to-screen-UV optical flow warping. |
-| **HUD & Crosshair Edge Protection** | `0.00` – `1.00` | `0.88` | Detects static HUD/hotbar/crosshair pixels and pins them to prevent ghosting. |
-| **Camera Smoothing Algorithm** | `Off`, `EMA`, `Spring`, `Adaptive Smart` | `Adaptive Smart` | Selects the 100% angle-conserving camera filter law. |
-| **Camera Smoothing Strength** | `0.00` – `0.95` | `0.55` | Higher values make slow camera pans silkier. |
-| **Fast-Turn Responsiveness Gain** | `0.10×` – `2.50×` | `1.05×` | Higher values make fast combat flicks snap immediately with zero lag. |
-| **Touch Micro-Jitter Deadzone** | `0.000` – `0.500 deg` | `0.025 deg` | Filters out stationary touchscreen polling noise without losing slow aim. |
-| **HUD Optimizer Mode** | `Off`, `Balanced`, `Ultra Low-Latency` | `Ultra Low-Latency` | Flushes GPU HUD queue before swap and eliminates Android UI canvas redraw lag. |
-| **HUD Pre-Swap Latency Flush** | `ON` / `OFF` | `ON` | Calls `glFlush()` pre-swap so crosshair and hotbar respond with zero buffered frame delay. |
-| **Inventory & GUI Fast-Response Boost** | `ON` / `OFF` | `ON` | Optimizes frame pacing when inventory, chest, or pause menus are open. |
-| **Smart Auto-Tune Budget Guard** | `ON` / `OFF` | `ON` | Steps down synthesis workload during heavy chunk-loading spikes. |
+| Rendered Multiplier | `2×`,`3×`,`4×` | `2×`/`3×` | How many frames per real (`2×` half stale, `4×` 75% stale) |
+| Frame Gen Mode | `Off`,`Single-Swap`,`Multi-Swap` | `Single-Swap` | Single integrates warp in one swap (lowest latency); Multi submits extra swaps with presentation timestamps |
+| Blend Strength | `0.00–1.00` | `0.65` | Warp vs real mix |
+| Motion Scale | `0.00–2.00×` | `1.00×` | Camera-UV warp scale |
+| HUD Protection | `0.00–1.00` | `0.88` | Pins static crosshair/hotbar |
+| Camera Smoothing | `Off`,`EMA`,`Spring`,`Smart` | `Smart` | 100% angle-conserving filter |
+| HUD Optimizer | `Off`,`Balanced`,`Ultra Low-Latency` | `Ultra` | Elevation 0, willNotDraw, swapInterval 0 |
+| Target FPS | `0` Unlimited, 30–240 | `0` for 800 | `0` is no pacing (needed for 800) |
 
 ---
 
 ## Key Features
 
-### 1. Selectable `2×`, `3×`, and `4×` (Max) GPU Frame Generation (`GlFrameInterpolator`)
-- **Direct `2×` / `3×` / `4×` Selector in Mod Menu**: Pick `2×` (Double FPS), `3×` (Triple FPS), or `4×` (Quad FPS — Max) right from the top of the Mod Menu.
-- **Works in Both Single-Swap and Multi-Swap Modes**:
-  - **Single-Swap Motion Synthesis (`2×` / `3×` / `4×`)**: Integrates 1-phase (`2×`), 2-phase (`3×`), or 3-phase (`4×`) bidirectional optical-flow samples in a single native swap pass for zero SurfaceFlinger queue latency.
-  - **Multi-Swap Frame Interpolation (`2×` / `3×` / `4×`)**: Submits `1`, `2`, or `3` intermediate synthesized frames plus the final frame (`2×`, `3×`, or `4×` total swaps) with monotonic `eglPresentationTimeANDROID` timestamps.
-- **No Center-Screen Logo**: Clean in-game view with zero floating logo clutter in the middle of the screen; optional top-left telemetry HUD card can be toggled or dragged anywhere via the LeviLaunchroid HUD Editor.
+### 1. JNGS TrueMotion Frame Generation
+- **Real warp on Android *and* host** (v3 vs v2.3 fake counter): tiled-GPU-safe `GlStateGuard` + `Max` textures + `uMotionVec` warp + `uPhase` single-point `0.5` (sharp, no blur averaging) + optional `Multi-Swap` with `eglPresentationTimeANDROID`. Falls back to counter-only only on GL error, never black.
+- **Zero center logo, zero dim:** `hideInHudEditor`, transparent `HudOverlay` bg, elevation 0, `willNotDraw` when idle, JNI auto-relocates LeviLaunchroid’s center-spawned overlays to edges.
 
-### 2. 100% Angle-Conserving Camera Smoother (`CameraSmoother`)
-- **Native `libminecraftpe.so` Camera Hooks**: Hooks `LocalPlayer::applyTurnDelta(Vec2 const&)`, `CameraAPI::tryGetFOV`, and `VanillaCameraAPI::getCameraPerspective`.
-- **2-Pole Sub-Pixel Residual Reservoir**: Every microradian of input rotation is accumulated in `double` precision and subtracted only as it is emitted to the game, guaranteeing **100.000% angle conservation** and **zero stationary drift**.
+### 2. 100% Angle-Conserving Camera Smoother
+- Hooks `applyTurnDelta`, `tryGetFOV`, `getCameraPerspective` with double-precision residual reservoir — 100.000% angle conservation, zero drift.
+
+### 3. Frame Pacer & Telemetry
+- Monotonic `steady_clock` pacing when capped; `0 = Unlimited` for 800 bench. `realFps` vs `effectiveFps` (displayed) both reported, so you can verify 800 is photons not just counter.
 
 ---
 
 ## Installation
 
-1. Download **`FrameGen.levipack`** from the repository root or the GitHub Actions **Artifacts** / **Releases** tab.
-2. Open **LeviLaunchroid (`LeviLauncher`)** on your Android device.
-3. Import **`FrameGen.levipack`** in the **Mods** tab and enable **LeviFrameGen**.
-4. Launch Minecraft Bedrock and open the **LeviLaunchroid Mod Menu** to pick `2×`, `3×`, or `4×` and tune your settings.
+1. Download **`FrameGen.levipack`** from repo root or Actions **Artifacts** / **Releases**.
+2. Open **LeviLaunchroid** → **Mods** → Import `FrameGen.levipack` → enable **JNGS Frame Gen**.
+3. Launch Minecraft → Mod Menu → pick `2×`/`3×`/`4×` and tune (see above).
 
 ---
 
 ## Building & Testing
 
-### Run Host Verification & Simulation Suite (Linux `x86_64`)
 ```bash
 g++ -std=c++20 -O2 -Wall -Wextra -Werror \
     -Isrc -Ipreloader_headers -Itests/host_stubs \
-    src/FrameGenConfig.cpp \
-    src/CameraSmoother.cpp \
-    src/FramePacer.cpp \
-    src/GlFrameInterpolator.cpp \
-    src/HudRenderer.cpp \
-    src/FrameGenMod.cpp \
-    tests/framegen_test_suite.cpp \
-    -ldl -pthread -o /tmp/framegen_test_suite
+    src/FrameGenConfig.cpp src/CameraSmoother.cpp src/FramePacer.cpp \
+    src/GlFrameInterpolator.cpp src/HudRenderer.cpp src/FrameGenMod.cpp \
+    tests/framegen_test_suite.cpp -ldl -pthread -o /tmp/framegen_test_suite
 /tmp/framegen_test_suite
-```
 
-### Build Android `arm64-v8a` (`FrameGen.levipack`) with Android NDK
-```bash
 cmake -B build -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
-    -DANDROID_ABI=arm64-v8a \
-    -DANDROID_PLATFORM=android-26 \
-    -DANDROID_STL=c++_shared \
-    -DCMAKE_BUILD_TYPE=Release
+    -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 \
+    -DANDROID_STL=c++_shared -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release --parallel
-"$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-unneeded build/libframegen.so
-python3 scripts/package_levipack.py --library build/libframegen.so --icon assets/icon.png --output FrameGen.levipack
+"$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-unneeded build/libjngsframegen.so
+python3 scripts/package_levipack.py --library build/libjngsframegen.so --icon assets/icon.png --output FrameGen.levipack
 python3 scripts/verify_levipack.py FrameGen.levipack
 ```

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generates a crisp 64x64 RGBA PNG icon for LeviFrameGen (FrameGen.levipack)."""
+"""Generates a crisp 64x64 RGBA PNG icon for JNGS Frame Gen (FrameGen.levipack)."""
 
 import math
 import struct

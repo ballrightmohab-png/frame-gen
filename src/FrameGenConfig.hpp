@@ -9,12 +9,12 @@
 
 namespace framegen {
 
-inline constexpr const char *kModId = "leviframegen";
-inline constexpr const char *kModuleId = "leviframegen.module";
-inline constexpr const char *kHudElementId = "leviframegen.hud_card";
-inline constexpr const char *kModName = "LeviFrameGen";
-inline constexpr const char *kModVersion = "2.3.0";
-inline constexpr const char *kModAuthor = "ballrightmohab-png";
+inline constexpr const char *kModId = "jngsframegen";
+inline constexpr const char *kModuleId = "jngsframegen.module";
+inline constexpr const char *kHudElementId = "jngsframegen.hud_card";
+inline constexpr const char *kModName = "JNGS Frame Gen";
+inline constexpr const char *kModVersion = "3.0.0";
+inline constexpr const char *kModAuthor = "JNGS";
 
 // Configuration keys exposed to LeviLauncher Mod Menu (V1 & V2)
 namespace keys {

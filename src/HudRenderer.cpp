@@ -164,7 +164,7 @@ std::vector<pl::modmenu::DrawCommand> HudRenderer::buildDrawCommands(
     }
 
     if (config.hudStyle == HudStyle::Compact) {
-        std::snprintf(lineBuf, sizeof(lineBuf), "LeviFrameGen [%s]",
+        std::snprintf(lineBuf, sizeof(lineBuf), "JNGS Frame Gen [%s]",
                       presetName(config.preset));
         addText(textX, y + 6.0f, lineBuf, titleColor, 12.5f);
 
@@ -179,7 +179,7 @@ std::vector<pl::modmenu::DrawCommand> HudRenderer::buildDrawCommands(
     }
 
     // Detailed 4-line layout
-    std::snprintf(lineBuf, sizeof(lineBuf), "LeviFrameGen v%s [%s]",
+    std::snprintf(lineBuf, sizeof(lineBuf), "JNGS Frame Gen v%s [%s]",
                   kModVersion, presetName(config.preset));
     addText(textX, y + 6.0f, lineBuf, titleColor, 12.5f);
 
@@ -215,7 +215,7 @@ pl::modmenu::HudEditorElement HudRenderer::buildHudEditorElement(
 
     pl::modmenu::HudEditorElement elem{};
     elem.elementId = kHudElementId;
-    elem.displayName = "LeviFrameGen Telemetry";
+    elem.displayName = "JNGS Frame Gen Telemetry";
     elem.x = config.hudPosX;
     elem.y = config.hudPosY;
     elem.width = cardW;
@@ -266,10 +266,10 @@ void HudRenderer::clearHud() noexcept {
         "_ZN2pl7modmenu16unregisterButtonENSt6__ndk117basic_string_viewIcNS1_"
         "11char_traitsIcEEEE"));
     if (unregFn != nullptr) {
-        unregFn("leviframegen.quick_button");
+        unregFn("jngsframegen.quick_button");
     }
 #else
-    pl::modmenu::unregisterButton("leviframegen.quick_button");
+    pl::modmenu::unregisterButton("jngsframegen.quick_button");
 #endif
 }
 

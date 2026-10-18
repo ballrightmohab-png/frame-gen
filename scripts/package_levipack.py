@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Packages LeviFrameGen into a validated LeviLaunchroid .levipack archive.
+"""Packages JNGS Frame Gen into a validated LeviLaunchroid .levipack archive.
 
 Usage:
-    python3 scripts/package_levipack.py --library build/libframegen.so \
+    python3 scripts/package_levipack.py --library build/libjngsframegen.so \
         --icon assets/icon.png --output FrameGen.levipack
 """
 
@@ -12,16 +12,16 @@ import sys
 import zipfile
 from pathlib import Path
 
-MOD_ID = "leviframegen"
-MOD_NAME = "LeviFrameGen"
-MOD_AUTHOR = "ballrightmohab-png"
-MOD_VERSION = "2.0.0"
+MOD_ID = "jngsframegen"
+MOD_NAME = "JNGS Frame Gen"
+MOD_AUTHOR = "JNGS"
+MOD_VERSION = "3.0.0"
 MOD_DESCRIPTION = (
-    "Frame Generation & Camera Smoothing for Minecraft Bedrock (LeviLaunchroid). "
-    "Motion-compensated temporal synthesis, sub-frame camera smoothing, "
-    "adaptive frame pacing, and live HUD telemetry."
+    "JNGS Frame Gen — True-Motion Frame Generation (2x/3x/4x) that feels like real FPS, "
+    "plus Camera Smoothing & HUD Optimizer for Minecraft Bedrock (LeviLaunchroid). "
+    "Zero-dimming, ultra low latency."
 )
-ENTRY = "libframegen.so"
+ENTRY = "libjngsframegen.so"
 
 
 def build_manifest(has_icon: bool) -> dict:

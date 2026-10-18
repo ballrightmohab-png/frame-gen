@@ -52,16 +52,16 @@ jobs:
             -DANDROID_STL=c++_shared \
             -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build libframegen.so
+      - name: Build libjngsframegen.so
         run: cmake --build build --config Release --parallel
 
       - name: Strip & Package FrameGen.levipack
         run: |
           "${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" \
-            --strip-unneeded build/libframegen.so
+            --strip-unneeded build/libjngsframegen.so
           python3 assets/make_icon.py
           python3 scripts/package_levipack.py \
-            --library build/libframegen.so \
+            --library build/libjngsframegen.so \
             --icon assets/icon.png \
             --output FrameGen.levipack
           python3 scripts/verify_levipack.py FrameGen.levipack
@@ -83,7 +83,7 @@ jobs:
           name: FrameGen-levipack-arm64-v8a
           path: |
             FrameGen.levipack
-            build/libframegen.so
+            build/libjngsframegen.so
             manifest.json
           if-no-files-found: error
 
@@ -93,5 +93,5 @@ jobs:
         with:
           files: |
             FrameGen.levipack
-            build/libframegen.so
+            build/libjngsframegen.so
           generate_release_notes: true

@@ -8,7 +8,7 @@ import sys
 import zipfile
 from pathlib import Path
 
-EXPECTED_ENTRY = "libframegen.so"
+EXPECTED_ENTRY = "libjngsframegen.so"
 ELF_MAGIC = b"\x7fELF"
 ELFCLASS64 = 2
 ET_DYN = 3
@@ -86,7 +86,7 @@ def verify_levipack(path: Path, allow_host_arch: bool = False) -> int:
 
         so_bytes = archive.read(EXPECTED_ENTRY)
         if len(so_bytes) < 64 or so_bytes[:4] != ELF_MAGIC:
-            print("error: libframegen.so is not a valid ELF binary", file=sys.stderr)
+            print(f"error: {EXPECTED_ENTRY} is not a valid ELF binary", file=sys.stderr)
             return 1
 
         ei_class = so_bytes[4]
@@ -108,14 +108,14 @@ def verify_levipack(path: Path, allow_host_arch: bool = False) -> int:
 
         if b"PLGetModRegistration" not in so_bytes:
             print(
-                "error: libframegen.so does not export PLGetModRegistration",
+                f"error: {EXPECTED_ENTRY} does not export PLGetModRegistration",
                 file=sys.stderr,
             )
             return 1
 
         if b"libpreloader.so" not in so_bytes:
             print(
-                "error: libframegen.so is missing DT_NEEDED libpreloader.so",
+                f"error: {EXPECTED_ENTRY} is missing DT_NEEDED libpreloader.so",
                 file=sys.stderr,
             )
             return 1
