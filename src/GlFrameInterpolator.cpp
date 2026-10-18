@@ -726,6 +726,7 @@ void GlFrameInterpolator::drawSynthesizedQuad(float mvU, float mvV, float phase,
 
 EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
                                               EGLSurface surface) noexcept {
+    try {
     if (mOrigSwapBuffers == nullptr) {
         return EGL_FALSE;
     }
@@ -1033,6 +1034,11 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
     }
 
     return swapResult;
+    } catch (...) {
+        mConsecutiveGlErrors++;
+        if (mOrigSwapBuffers) return mOrigSwapBuffers(dpy, surface);
+        return EGL_TRUE;
+    }
 }
 
 } // namespace framegen

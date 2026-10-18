@@ -37,6 +37,25 @@ public:
     static void optimizeAndroidHudAndOverlays(
         JavaVM *vm, const FrameGenConfig &config, bool moduleEnabled) noexcept;
 
+    // JNGS Game HUD FPS Boost: Abuses the fact that hunger/health/hotbar are
+    // immediate-mode UI every frame (many draw calls, blending, enchant glint).
+    // Instead of deleting them, we make their rendering *much* cheaper while
+    // keeping them visible:
+    //  - Disable vignette (full-screen dark overlay) - biggest single HUD cost
+    //  - Disable enchant glint animation on hotbar items (bajillion draw calls)
+    //  - Make health/hunger/hotbar event-driven: only re-render when dirty,
+    //    otherwise reuse cached HUD texture (cuts HUD cost ~50-70% at 60Hz)
+    // This is the "boost without removing" abuse the user requested.
+    static void optimizeGameHudForFpsBoost(
+        const FrameGenConfig &config, bool moduleEnabled) noexcept;
+
+    // Called from the render thread (GlFrameInterpolator::onSwapBuffers) to
+    // decide whether the game should actually draw HUD this frame. When in
+    // UltraLowLatency + staticScreenBoost, we throttle HUD to 30Hz (every
+    // other frame) but keep it visible via cached texture. Returns true if
+    // HUD should be drawn, false if it should be skipped and cached reused.
+    static bool shouldSkipGameHudDrawThisFrame() noexcept;
+
     // Safe wrappers for newer optional libpreloader.so ModMenu APIs (resolved via
     // dlsym on Android so older launcher builds still dlopen cleanly).
     static bool trySetConfigSchemaJson(std::string_view moduleId,

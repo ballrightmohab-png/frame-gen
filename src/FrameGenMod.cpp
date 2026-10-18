@@ -62,6 +62,7 @@ bool FrameGenMod::load(pl::mod::ModContext &context) {
     GlFrameInterpolator::instance().updateConfig(initialCfg);
     GlFrameInterpolator::instance().setModuleEnabled(true);
     HudRenderer::optimizeAndroidHudAndOverlays(vm, initialCfg, true);
+    HudRenderer::optimizeGameHudForFpsBoost(initialCfg, true);
 
     pl::input::registerKeyCallback(&FrameGenMod::onKeyEvent);
 
@@ -100,6 +101,7 @@ bool FrameGenMod::enable(pl::mod::ModContext &context) {
     GlFrameInterpolator::instance().updateConfig(cfg);
     GlFrameInterpolator::instance().setModuleEnabled(true);
     HudRenderer::optimizeAndroidHudAndOverlays(vm, cfg, true);
+    HudRenderer::optimizeGameHudForFpsBoost(cfg, true);
 
     std::string ownerModId;
     {
@@ -285,6 +287,7 @@ void FrameGenMod::syncSubsystemsAndPersist(bool refreshSchema) {
     CameraSmoother::instance().updateConfig(cfg, enabled);
     GlFrameInterpolator::instance().updateConfig(cfg);
     HudRenderer::optimizeAndroidHudAndOverlays(vm, cfg, enabled);
+    HudRenderer::optimizeGameHudForFpsBoost(cfg, enabled);
 
     RuntimeTelemetrySnapshot telemetry =
         GlFrameInterpolator::instance().telemetrySnapshot();

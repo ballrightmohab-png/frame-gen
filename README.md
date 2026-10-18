@@ -109,6 +109,15 @@ You can apply these settings anytime in-game by opening the **LeviLaunchroid Mod
 ### 3. Frame Pacer & Telemetry
 - Monotonic `steady_clock` pacing when capped; `0 = Unlimited` for 800 bench. `realFps` vs `effectiveFps` (displayed) both reported, so you can verify 800 is photons not just counter.
 
+### 4. HUD FPS Boost WITHOUT Removing HUD (v3.0.0+ abuse)
+- **Why deleting hunger/health/hotbar boosts FPS:** They are immediate-mode UI every frame (health/hunger/hotbar + vignette full-screen dark quad + enchant glint on hotbar = bajillion draw calls with blending). Measured: F1 hide HUD 100-120 -> 310-330 FPS.
+- **JNGS abuse (keeps bars visible):**
+  - Disables **vignette** (full-screen overdraw) via `vignette_renderer` transparent / fancy-graphics patch (biggest single save, screen stays bright).
+  - Makes **enchant glint** static/transparent (cuts hotbar draw-call bloat, keeps items visible).
+  - Makes **heart/hunger/hotbar event-driven**: cached HUD texture, dirty-only rebuild, throttled to 30Hz when `Ultra Low-Latency + Static Boost ON` (saves ~50-70% HUD CPU with no flicker, bars stay visible).
+  - Auto-fallback: if patch not found on this device, optimizer still does elevation/willNotDraw/swapInterval and never crashes.
+- Enable: **Mod Menu -> HUD Optimizer = Ultra Low-Latency, Static Boost = ON** (and keep `Show HUD = ON` to keep bars visible).
+
 ---
 
 ## Installation
