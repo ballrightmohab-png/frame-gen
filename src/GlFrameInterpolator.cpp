@@ -85,13 +85,11 @@ void main() {
     float hudConfidence = clamp((motionDiff - staticDiff * 2.4) * 5.5, 0.0, 1.0);
     float hudMask = hudConfidence * clamp(uHudProtection, 0.0, 1.0);
 
-    // Motion Blur toggle copied from BedrockTools Module system (masterEnabled):
-    // OFF (default, 0.0) = no blur for good — 100% sharp curUnshifted, 0% synthesized
-    // ON (1.0) = cinematic blur — original 0.20-0.58 *1.0 with soft mix
-    // User asked: motion blur OFF by default and just stop it for good
+    // Polished: Motion Blur toggle — OFF (default) = 0% blur for good, ON = cinematic
+    // Copied BedrockTools Module masterEnabled style, default false (sharp)
     float finalWeight;
     if (uMotionBlur < 0.5) {
-        finalWeight = 0.0; // No blur at all — pure sharp cur
+        finalWeight = 0.0; // Polished: no blur at all — 100% sharp curUnshifted
     } else {
         float edgeGuard = 1.0 - smoothstep(0.20, 0.58, motionDiff);
         finalWeight = clamp(uBlendWeight * edgeGuard * (1.0 - hudMask), 0.0, 1.0);
@@ -872,14 +870,18 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
                     mHasFrameHistory = true;
                     swapResult = mOrigSwapBuffers(dpy, surface);
                 } else {
-                    // Fix black screen when holding item + looking east/west: large yaw + item
-                    // causes warp to sample outside and mTexPrev can be stale. Skip warp if large.
-                    const bool isEastWestLargeYaw = std::abs(motion.mvU) > 0.35f || std::abs(motion.mvV) > 0.35f;
-                    const bool isHoldingItemLargeMotion = isEastWestLargeYaw && cfg.hudProtection > 0.5f;
-                    if (isHoldingItemLargeMotion) {
-                        // Don't warp — just show real frame, no black
+                    // Polish: black screen fix for all directions + holding item
+                    // Previously only east/west, now any large motion or uninitialized history causes black
+                    // if warp samples outside. Skip warp and show real frame to keep it polished.
+                    const bool hasLargeMotion = std::abs(motion.mvU) > 0.30f || std::abs(motion.mvV) > 0.30f;
+                    const bool hasUninitializedHistory = !mHasFrameHistory || mTexPrev == 0 || mTexCur == 0;
+                    const bool shouldSkipWarpForPolish = hasLargeMotion || hasUninitializedHistory || isSceneCut;
+                    // Also keep the original east/west + holding item check for specifically that bug
+                    const bool isEastWestBug = hasLargeMotion && cfg.hudProtection > 0.5f;
+                    if (shouldSkipWarpForPolish || isEastWestBug) {
                         swapResult = mOrigSwapBuffers(dpy, surface);
-                        std::swap(mTexPrev, mTexCur);
+                        if (mTexPrev != 0 && mTexCur != 0) std::swap(mTexPrev, mTexCur);
+                        else mHasFrameHistory = true;
                     } else {
                     const bool canMultiSwap =
                         (cfg.frameGenMode ==

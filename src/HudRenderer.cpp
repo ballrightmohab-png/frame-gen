@@ -619,6 +619,12 @@ void HudRenderer::optimizeAndroidHudAndOverlays(
                                                         setElevationMid, 0.0f);
                                     clearJniException();
                                 }
+                                // Polished: also clear dim behind and ensure no black overlay
+                                jmethodID setAlphaMid = env->GetMethodID(hudCls, "setAlpha", "(F)V");
+                                if (!clearJniException() && setAlphaMid != nullptr) {
+                                    env->CallVoidMethod(hudView, setAlphaMid, 1.0f);
+                                    clearJniException();
+                                }
                                 if (setWillNotDrawMid != nullptr) {
                                     const bool skipCanvasDraw =
                                         moduleEnabled &&
