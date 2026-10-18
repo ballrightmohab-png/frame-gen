@@ -84,24 +84,20 @@ void main() {
     float hudConfidence = clamp((motionDiff - staticDiff * 2.4) * 5.5, 0.0, 1.0);
     float hudMask = hudConfidence * clamp(uHudProtection, 0.0, 1.0);
 
-    // Disocclusion / edge guard to prevent ghosting on high-contrast boundaries
-    float edgeGuard = 1.0 - smoothstep(0.20, 0.58, motionDiff);
-    float finalWeight = clamp(uBlendWeight * edgeGuard * (1.0 - hudMask), 0.0, 1.0);
+    // JNGS Sharp: edgeGuard is aggressive to keep block/entity edges razor-sharp,
+    // not blurry. Previously smoothstep(0.20,0.58) kept too much blur on mid-contrast;
+    // now 0.12-0.28 kills blend early so high-frequency edges stay from curUnshifted.
+    float edgeGuard = 1.0 - smoothstep(0.12, 0.28, motionDiff);
+    // Keep finalWeight low and capped — heavy blend is what users see as "motion blur".
+    // 0.60 scale + 0.62 cap means even at max uBlendWeight 0.88, final is ~0.33-0.42,
+    // so 58-67% is sharp curUnshifted, not blurry synthesized.
+    float finalWeight = clamp(uBlendWeight * edgeGuard * (1.0 - hudMask) * 0.60, 0.0, 0.62);
 
-    vec4 synthesized;
-    if (uPhase < -3.5) {
-        // 4x Single-Swap multi-phase optical-flow integration (t = 1/4, 2/4, 3/4)
-        synthesized = 0.22 * sampleWarpPhase(0.25) +
-                      0.33 * sampleWarpPhase(0.50) +
-                      0.45 * sampleWarpPhase(0.75);
-    } else if (uPhase < -2.5) {
-        // 3x Single-Swap multi-phase optical-flow integration (t = 1/3, 2/3)
-        synthesized = 0.42 * sampleWarpPhase(0.3333) +
-                      0.58 * sampleWarpPhase(0.6667);
-    } else {
-        // 2x Single-Swap or exact Multi-Swap sub-frame slice
-        synthesized = mix(prevShifted, curShifted, phase);
-    }
+    // Sharp warp: single-phase only — no multi-phase averaging (that *is* motion blur).
+    // 4x/3x/2x all use one warp at phase (0.5 for Single-Swap, 0.25/0.5/0.75 for MultiSwap slices)
+    // which keeps block edges and item models crisp. prevShifted+curShifted are warped
+    // toward midpoint (REAL A forward, REAL B backward) and mixed at phase.
+    vec4 synthesized = mix(prevShifted, curShifted, phase);
     gl_FragColor = mix(curUnshifted, synthesized, finalWeight);
 }
 )glsl";
@@ -145,8 +141,8 @@ GLuint createTexture2D(GLsizei width, GLsizei height) noexcept {
         return 0;
     }
     glBindTexture(GL_TEXTURE_2D, tex);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
@@ -945,8 +941,8 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
                         // Now we keep it sharp and only vary blend by mult.
                         const float multBoost =
                             (effectiveMult == 4)
-                                ? 0.88f
-                                : ((effectiveMult == 3) ? 0.80f : 0.72f);
+                                ? 0.62f
+                                : ((effectiveMult == 3) ? 0.58f : 0.52f);
                         const float effectiveBlend =
                             prevPacing.autoTuneReduced
                                 ? (cfg.blendStrength * 0.45f)
