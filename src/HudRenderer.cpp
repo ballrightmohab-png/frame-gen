@@ -8,6 +8,9 @@
 
 #include <atomic>
 #include <dlfcn.h>
+#include <pl/memory/Patch.hpp>
+#include <pl/memory/Signature.hpp>
+#include <pl/memory/Vtable.hpp>
 
 namespace framegen {
 namespace {
@@ -701,7 +704,7 @@ void HudRenderer::optimizeGameHudForFpsBoost(
             // NOP the vignette draw - make it not darken screen and save fill rate.
             // We don't know exact size, so just try to patch a small region.
             // If patch fails, it's okay.
-            pl::memory::patchBytes(vignetteAddr, std::span<const std::uint8_t>{});
+            pl::memory::writeBytes(vignetteAddr, std::span<const std::uint8_t>{}, "jngs_vignette");
         }
         // Attempt 2: Disable enchant glint (the "bajillion draw calls" for hotbar).
         // Glint is rendered with shader "glint" or texture "enchanted_glint".
@@ -712,13 +715,13 @@ void HudRenderer::optimizeGameHudForFpsBoost(
                 "glint", "libminecraftpe.so");
         }
         if (glintAddr != 0) {
-            pl::memory::patchBytes(glintAddr, std::span<const std::uint8_t>{});
+            pl::memory::writeBytes(glintAddr, std::span<const std::uint8_t>{}, "jngs_glint");
         }
         // Attempt 3: Make HUD update event-driven by hooking Gui::render
         // and throttling it. We try a few known vtable names.
         const char* guiClassNames[] = {"Gui", "MinecraftGui", "Hud", "ScreenView", "MinecraftHud"};
         for (const char* cls : guiClassNames) {
-            std::uintptr_t vaddr = pl::memory::resolveVtableFunction(cls, 0, "render");
+            std::uintptr_t vaddr = pl::memory::resolveVtableFunction(cls, 0, "libminecraftpe.so");
             if (vaddr != 0) {
                 // Found a candidate, we could hook it to throttle.
                 // For now just mark as found to avoid re-scanning.
