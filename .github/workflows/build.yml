@@ -53,7 +53,22 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release
 
       - name: Build libjngsframegen.so
-        run: cmake --build build --config Release --parallel
+        run: |
+          cmake --build build --config Release --parallel --verbose 2>&1 | tee /tmp/build.log
+          status=\${PIPESTATUS[0]}
+          if [ $status -ne 0 ]; then
+            echo "::group::Build log"
+            cat /tmp/build.log
+            echo "::endgroup::"
+            exit $status
+          fi
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: /tmp/build.log
 
       - name: Strip & Package FrameGen.levipack
         run: |
