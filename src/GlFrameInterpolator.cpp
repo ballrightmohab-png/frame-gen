@@ -84,20 +84,15 @@ void main() {
     float hudConfidence = clamp((motionDiff - staticDiff * 2.4) * 5.5, 0.0, 1.0);
     float hudMask = hudConfidence * clamp(uHudProtection, 0.0, 1.0);
 
-    // JNGS Sharp: edgeGuard is aggressive to keep block/entity edges razor-sharp,
-    // not blurry. Previously smoothstep(0.20,0.58) kept too much blur on mid-contrast;
-    // now 0.12-0.28 kills blend early so high-frequency edges stay from curUnshifted.
-    float edgeGuard = 1.0 - smoothstep(0.12, 0.28, motionDiff);
-    // Keep finalWeight low and capped — heavy blend is what users see as "motion blur".
-    // 0.60 scale + 0.62 cap means even at max uBlendWeight 0.88, final is ~0.33-0.42,
-    // so 58-67% is sharp curUnshifted, not blurry synthesized.
-    float finalWeight = clamp(uBlendWeight * edgeGuard * (1.0 - hudMask) * 0.60, 0.0, 0.62);
+    // JNGS Ultra-Sharp (motion blur killer): user still saw blur at 0.12-0.28 / 0.60*0.62
+    // Now 0.08-0.18 kills blend at tiny luma diff, and finalWeight is *0.38 capped 0.38
+    // so even at max 0.62 boost, final is ~0.14-0.18 (82-86% sharp curUnshifted). No blur.
+    float edgeGuard = 1.0 - smoothstep(0.08, 0.18, motionDiff);
+    float finalWeight = clamp(uBlendWeight * edgeGuard * (1.0 - hudMask) * 0.38, 0.0, 0.38);
 
-    // Sharp warp: single-phase only — no multi-phase averaging (that *is* motion blur).
-    // 4x/3x/2x all use one warp at phase (0.5 for Single-Swap, 0.25/0.5/0.75 for MultiSwap slices)
-    // which keeps block edges and item models crisp. prevShifted+curShifted are warped
-    // toward midpoint (REAL A forward, REAL B backward) and mixed at phase.
-    vec4 synthesized = mix(prevShifted, curShifted, phase);
+    // Ultra-sharp warp: no 50/50 blend ghosting — use hard mix based on phase
+    // to keep pixels from either prev or cur, not both. This is what kills the last blur.
+    vec4 synthesized = mix(prevShifted, curShifted, smoothstep(0.45, 0.55, phase));
     gl_FragColor = mix(curUnshifted, synthesized, finalWeight);
 }
 )glsl";
@@ -941,8 +936,8 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
                         // Now we keep it sharp and only vary blend by mult.
                         const float multBoost =
                             (effectiveMult == 4)
-                                ? 0.62f
-                                : ((effectiveMult == 3) ? 0.58f : 0.52f);
+                                ? 0.42f
+                                : ((effectiveMult == 3) ? 0.38f : 0.32f);
                         const float effectiveBlend =
                             prevPacing.autoTuneReduced
                                 ? (cfg.blendStrength * 0.45f)
