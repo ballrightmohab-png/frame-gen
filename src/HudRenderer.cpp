@@ -687,53 +687,10 @@ void HudRenderer::optimizeGameHudForFpsBoost(
     if (!gGameHudPatchApplied.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
         return;
     }
-#if defined(__ANDROID__)
-    // Try to disable vignette: search for vignette texture or renderer.
-    // Vignette is drawn as a full-screen quad with texture "vignette.png" or
-    // via Hud::renderVignette(). We patch its first instruction to `ret`.
-    // If signature not found, we just keep going - no crash.
-    try {
-        // Attempt 1: Find vignette string and then nearby function.
-        // We use a very permissive signature for the vignette draw call.
-        // If not found, we fallback to making the vignette texture transparent
-        // via a resource-pack style override (handled by the game's resource
-        // manager, but we can also just patch the glDrawArrays for vignette).
-        std::uintptr_t vignetteAddr = pl::memory::resolveSignature(
-            "vignette", "libminecraftpe.so");
-        if (vignetteAddr != 0) {
-            // NOP the vignette draw - make it not darken screen and save fill rate.
-            // We don't know exact size, so just try to patch a small region.
-            // If patch fails, it's okay.
-            pl::memory::writeBytes(vignetteAddr, std::span<const std::uint8_t>{}, "jngs_vignette");
-        }
-        // Attempt 2: Disable enchant glint (the "bajillion draw calls" for hotbar).
-        // Glint is rendered with shader "glint" or texture "enchanted_glint".
-        std::uintptr_t glintAddr = pl::memory::resolveSignature(
-            "enchanted_glint", "libminecraftpe.so");
-        if (glintAddr == 0) {
-            glintAddr = pl::memory::resolveSignature(
-                "glint", "libminecraftpe.so");
-        }
-        if (glintAddr != 0) {
-            pl::memory::writeBytes(glintAddr, std::span<const std::uint8_t>{}, "jngs_glint");
-        }
-        // Attempt 3: Make HUD update event-driven by hooking Gui::render
-        // and throttling it. We try a few known vtable names.
-        const char* guiClassNames[] = {"Gui", "MinecraftGui", "Hud", "ScreenView", "MinecraftHud"};
-        for (const char* cls : guiClassNames) {
-            std::uintptr_t vaddr = pl::memory::resolveVtableFunction(cls, 0, "libminecraftpe.so");
-            if (vaddr != 0) {
-                // Found a candidate, we could hook it to throttle.
-                // For now just mark as found to avoid re-scanning.
-                break;
-            }
-        }
-    } catch (...) {
-        // Never crash from HUD optimizer - it's best-effort.
-    }
-#else
+    // Android patches are best-effort and currently no-op to keep build green.
+    // Vignette/glint disabling via writeBytes will be re-added once signature is validated.
+    // For now, HUD FPS boost is via Ultra+StaticBoost throttling (shouldSkip) and JNI elevation/willNotDraw.
     (void)config;
-#endif
 }
 
 bool HudRenderer::shouldSkipGameHudDrawThisFrame() noexcept {
