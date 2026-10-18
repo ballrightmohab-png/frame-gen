@@ -85,20 +85,19 @@ void main() {
     float hudConfidence = clamp((motionDiff - staticDiff * 2.4) * 5.5, 0.0, 1.0);
     float hudMask = hudConfidence * clamp(uHudProtection, 0.0, 1.0);
 
-    // Motion Blur toggle: 0 = sharp (no blur), 1 = blur (cinematic)
-    // User asked to keep as setting, default OFF (sharp) for 200 FPS real feel
-    float edgeLow = mix(0.08, 0.20, uMotionBlur);
-    float edgeHigh = mix(0.18, 0.58, uMotionBlur);
-    float edgeGuard = 1.0 - smoothstep(edgeLow, edgeHigh, motionDiff);
-    float blurScale = mix(0.38, 1.0, uMotionBlur);
-    float blurCap = mix(0.38, 1.0, uMotionBlur);
-    float finalWeight = clamp(uBlendWeight * edgeGuard * (1.0 - hudMask) * blurScale, 0.0, blurCap);
+    // Motion Blur toggle copied from BedrockTools Module system (masterEnabled):
+    // OFF (default, 0.0) = no blur for good — 100% sharp curUnshifted, 0% synthesized
+    // ON (1.0) = cinematic blur — original 0.20-0.58 *1.0 with soft mix
+    // User asked: motion blur OFF by default and just stop it for good
+    float finalWeight;
+    if (uMotionBlur < 0.5) {
+        finalWeight = 0.0; // No blur at all — pure sharp cur
+    } else {
+        float edgeGuard = 1.0 - smoothstep(0.20, 0.58, motionDiff);
+        finalWeight = clamp(uBlendWeight * edgeGuard * (1.0 - hudMask), 0.0, 1.0);
+    }
 
-    // Warp: when blur OFF use hard 0.45-0.55 switch (sharp, no ghost), when ON use soft phase mix (blurry)
-    float sharpPhase = smoothstep(0.45, 0.55, phase);
-    float softPhase = phase;
-    float usePhase = mix(sharpPhase, softPhase, uMotionBlur);
-    vec4 synthesized = mix(prevShifted, curShifted, usePhase);
+    vec4 synthesized = mix(prevShifted, curShifted, phase); // phase 0.5, but finalWeight=0 when OFF so it won't show
     gl_FragColor = mix(curUnshifted, synthesized, finalWeight);
 }
 )glsl";
