@@ -587,6 +587,13 @@ ConfigApplyResult applyConfigKeyValue(FrameGenConfig &config,
         return ConfigApplyResult::UpdatedConfig;
     }
 
+    if (key == keys::kEnableMotionBlur) {
+        config.enableMotionBlur =
+            parseBoolValue(value, config.enableMotionBlur);
+        config.normalize();
+        return ConfigApplyResult::UpdatedConfig;
+    }
+
     if (key == keys::kShowHud) {
         config.showHud = parseBoolValue(value, config.showHud);
         config.normalize();
@@ -701,6 +708,10 @@ void appendV1ModuleConfigs(pl::modmenu::ModuleBuilder &builder,
                 "HUD Optimizer: Remove All Screen Overlays",
                 pl::modmenu::ConfigType::Toggle,
                 config.clearScreenOverlays ? "true" : "false")
+        .config(keys::kEnableMotionBlur,
+                "Motion Blur (ON=cinematic blur, OFF=sharp no-blur)",
+                pl::modmenu::ConfigType::Toggle,
+                config.enableMotionBlur ? "true" : "false")
         .config(keys::kShowHud,
                 "Show Optional Telemetry Badge",
                 pl::modmenu::ConfigType::Toggle,
@@ -1085,6 +1096,10 @@ std::string buildV2ConfigSchemaJson(const FrameGenConfig &config,
               "Remove Center-Screen Overlays & Logos",
               "Keeps the screen 100% clean with zero floating logos or boxes.",
               config.clearScreenOverlays, true, {}, {});
+    addToggle(keys::kEnableMotionBlur, "pacing", "HUD Optimizer",
+              "Motion Blur",
+              "ON = cinematic blur (may look blurry), OFF = sharp no-blur (recommended for 200 FPS real feel).",
+              config.enableMotionBlur, true, {}, {});
 
     addToggle(keys::kAutoTune, "pacing", "Frame Pacing",
               "Smart Auto-Tune Budget Guard",
@@ -1206,6 +1221,7 @@ bool loadConfigFromFile(const std::filesystem::path &path,
     getBool(keys::kHudLatencyFlush, outConfig.hudLatencyFlush);
     getBool(keys::kHudStaticScreenBoost, outConfig.hudStaticScreenBoost);
     getBool(keys::kClearScreenOverlays, outConfig.clearScreenOverlays);
+    getBool(keys::kEnableMotionBlur, outConfig.enableMotionBlur);
 
     getBool(keys::kShowHud, outConfig.showHud);
     int hudStyleInt = static_cast<int>(outConfig.hudStyle);
@@ -1220,6 +1236,7 @@ bool loadConfigFromFile(const std::filesystem::path &path,
     if (fileSchemaVersion < 3) {
         outConfig.showHud = false;
         outConfig.clearScreenOverlays = true;
+        outConfig.enableMotionBlur = false;
         outConfig.hudPosX = 16.0f;
         outConfig.hudPosY = 16.0f;
     }
@@ -1268,6 +1285,7 @@ bool saveConfigToFile(const std::filesystem::path &path,
         << "  \"" << keys::kHudLatencyFlush << "\": " << (c.hudLatencyFlush ? "true" : "false") << ",\n"
         << "  \"" << keys::kHudStaticScreenBoost << "\": " << (c.hudStaticScreenBoost ? "true" : "false") << ",\n"
         << "  \"" << keys::kClearScreenOverlays << "\": " << (c.clearScreenOverlays ? "true" : "false") << ",\n"
+        << "  \"" << keys::kEnableMotionBlur << "\": " << (c.enableMotionBlur ? "true" : "false") << ",\n"
         << "  \"" << keys::kShowHud << "\": " << (c.showHud ? "true" : "false") << ",\n"
         << "  \"" << keys::kHudStyle << "\": " << static_cast<int>(c.hudStyle) << ",\n"
         << "  \"" << keys::kHudOpacity << "\": " << c.hudOpacity << ",\n"

@@ -40,6 +40,7 @@ inline constexpr const char *kHudOptimizerMode = "hud_optimizer_mode";
 inline constexpr const char *kHudLatencyFlush = "hud_latency_flush";
 inline constexpr const char *kHudStaticScreenBoost = "hud_static_screen_boost";
 inline constexpr const char *kClearScreenOverlays = "clear_screen_overlays";
+inline constexpr const char *kEnableMotionBlur = "enable_motion_blur";
 
 inline constexpr const char *kShowHud = "show_hud";
 inline constexpr const char *kHudStyle = "hud_style";
@@ -144,6 +145,9 @@ struct FrameGenConfig {
     bool hudLatencyFlush = true;
     bool hudStaticScreenBoost = true;
     bool clearScreenOverlays = true;
+
+    // Motion Blur toggle — requested to keep as setting (ON = blur, OFF = sharp, default OFF)
+    bool enableMotionBlur = false;
 
     // Optional Telemetry HUD (OFF by default so screen stays 100% clean)
     bool showHud = false;

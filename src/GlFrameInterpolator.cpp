@@ -51,6 +51,7 @@ uniform vec2 uMotionVec;
 uniform float uPhase;
 uniform float uBlendWeight;
 uniform float uHudProtection;
+uniform float uMotionBlur;
 
 float luma(vec3 c) {
     return dot(c, vec3(0.299, 0.587, 0.114));
@@ -84,15 +85,20 @@ void main() {
     float hudConfidence = clamp((motionDiff - staticDiff * 2.4) * 5.5, 0.0, 1.0);
     float hudMask = hudConfidence * clamp(uHudProtection, 0.0, 1.0);
 
-    // JNGS Ultra-Sharp (motion blur killer): user still saw blur at 0.12-0.28 / 0.60*0.62
-    // Now 0.08-0.18 kills blend at tiny luma diff, and finalWeight is *0.38 capped 0.38
-    // so even at max 0.62 boost, final is ~0.14-0.18 (82-86% sharp curUnshifted). No blur.
-    float edgeGuard = 1.0 - smoothstep(0.08, 0.18, motionDiff);
-    float finalWeight = clamp(uBlendWeight * edgeGuard * (1.0 - hudMask) * 0.38, 0.0, 0.38);
+    // Motion Blur toggle: 0 = sharp (no blur), 1 = blur (cinematic)
+    // User asked to keep as setting, default OFF (sharp) for 200 FPS real feel
+    float edgeLow = mix(0.08, 0.20, uMotionBlur);
+    float edgeHigh = mix(0.18, 0.58, uMotionBlur);
+    float edgeGuard = 1.0 - smoothstep(edgeLow, edgeHigh, motionDiff);
+    float blurScale = mix(0.38, 1.0, uMotionBlur);
+    float blurCap = mix(0.38, 1.0, uMotionBlur);
+    float finalWeight = clamp(uBlendWeight * edgeGuard * (1.0 - hudMask) * blurScale, 0.0, blurCap);
 
-    // Ultra-sharp warp: no 50/50 blend ghosting — use hard mix based on phase
-    // to keep pixels from either prev or cur, not both. This is what kills the last blur.
-    vec4 synthesized = mix(prevShifted, curShifted, smoothstep(0.45, 0.55, phase));
+    // Warp: when blur OFF use hard 0.45-0.55 switch (sharp, no ghost), when ON use soft phase mix (blurry)
+    float sharpPhase = smoothstep(0.45, 0.55, phase);
+    float softPhase = phase;
+    float usePhase = mix(sharpPhase, softPhase, uMotionBlur);
+    vec4 synthesized = mix(prevShifted, curShifted, usePhase);
     gl_FragColor = mix(curUnshifted, synthesized, finalWeight);
 }
 )glsl";
@@ -555,6 +561,7 @@ bool GlFrameInterpolator::compileSynthesisProgram() noexcept {
     mUniPhase = glGetUniformLocation(prog, "uPhase");
     mUniBlendWeight = glGetUniformLocation(prog, "uBlendWeight");
     mUniHudProtection = glGetUniformLocation(prog, "uHudProtection");
+    mUniMotionBlur = glGetUniformLocation(prog, "uMotionBlur");
     return true;
 }
 
@@ -684,6 +691,9 @@ void GlFrameInterpolator::drawSynthesizedQuad(float mvU, float mvV, float phase,
     if (mUniHudProtection >= 0) {
         glUniform1f(mUniHudProtection, hudProtection);
     }
+    if (mUniMotionBlur >= 0) {
+        glUniform1f(mUniMotionBlur, mMotionBlurEnabled ? 1.0f : 0.0f);
+    }
 
     const GLuint posLoc =
         (mAttrPos >= 0) ? static_cast<GLuint>(mAttrPos) : 0U;
@@ -751,6 +761,7 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
     }
 
     const bool modEnabled = mModuleEnabled.load(std::memory_order_relaxed);
+    mMotionBlurEnabled = cfg.enableMotionBlur;
     if (mResetRequested.exchange(false, std::memory_order_relaxed)) {
         resetTemporalState();
     }
@@ -934,10 +945,9 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
                         // previously did multi-phase averaging which looks like
                         // motion blur and prevents 800 from feeling like 800.
                         // Now we keep it sharp and only vary blend by mult.
-                        const float multBoost =
-                            (effectiveMult == 4)
-                                ? 0.42f
-                                : ((effectiveMult == 3) ? 0.38f : 0.32f);
+                        const float multBoost = cfg.enableMotionBlur
+                                ? ((effectiveMult == 4) ? 0.88f : ((effectiveMult == 3) ? 0.80f : 0.72f))
+                                : ((effectiveMult == 4) ? 0.42f : ((effectiveMult == 3) ? 0.38f : 0.32f));
                         const float effectiveBlend =
                             prevPacing.autoTuneReduced
                                 ? (cfg.blendStrength * 0.45f)

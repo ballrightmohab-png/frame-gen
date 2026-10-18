@@ -144,6 +144,8 @@ private:
     GLint mUniPhase = -1;
     GLint mUniBlendWeight = -1;
     GLint mUniHudProtection = -1;
+    GLint mUniMotionBlur = -1;
+    bool mMotionBlurEnabled = false;
 
     std::int64_t mLastPresentedTimestampNs = 0;
     std::uint64_t mSceneCutCount = 0;
