@@ -14,7 +14,7 @@ inline constexpr const char *kModId = "jngsframegen";
 inline constexpr const char *kModuleId = "jngsframegen.module";
 inline constexpr const char *kHudElementId = "jngsframegen.hud_card";
 inline constexpr const char *kModName = "JNGS Frame Gen";
-inline constexpr const char *kModVersion = "3.0.0";
+inline constexpr const char *kModVersion = "3.1.0";
 inline constexpr const char *kModAuthor = "JNGS";
 
 // Configuration keys exposed to LeviLauncher Mod Menu (V1 & V2)

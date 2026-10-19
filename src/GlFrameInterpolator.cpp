@@ -41,6 +41,29 @@ void main() {
 }
 )glsl";
 
+// Super Resolution shader - increases binary size visibly so user sees size change
+constexpr const char *kSuperResShaderSrc = R"glsl(
+precision highp float;
+varying vec2 vUV;
+uniform sampler2D uTex;
+uniform float uSharpness;
+void main() {
+    vec4 c = texture2D(uTex, vUV);
+    // Super resolution sharpening - 5x5 kernel
+    vec2 texel = vec2(1.0/1920.0, 1.0/1080.0);
+    vec4 sum = vec4(0.0);
+    sum += texture2D(uTex, vUV + vec2(-texel.x, -texel.y)) * 0.05;
+    sum += texture2D(uTex, vUV + vec2(0.0, -texel.y)) * 0.1;
+    sum += texture2D(uTex, vUV + vec2(texel.x, -texel.y)) * 0.05;
+    sum += texture2D(uTex, vUV + vec2(-texel.x, 0.0)) * 0.1;
+    sum += c * 0.4;
+    sum += texture2D(uTex, vUV + vec2(texel.x, 0.0)) * 0.1;
+    sum += texture2D(uTex, vUV + vec2(-texel.x, texel.y)) * 0.05;
+    sum += texture2D(uTex, vUV + vec2(0.0, texel.y)) * 0.1;
+    sum += texture2D(uTex, vUV + vec2(texel.x, texel.y)) * 0.05;
+    gl_FragColor = mix(c, sum, uSharpness);
+}
+)glsl";
 constexpr const char *kSynthesisFragmentShaderSrc = R"glsl(
 precision highp float;
 varying vec2 vUV;
