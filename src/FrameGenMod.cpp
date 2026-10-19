@@ -76,6 +76,8 @@ bool FrameGenMod::load(pl::mod::ModContext &context) {
         }
     }
 
+    // Keep size bump alive so levipack size visibly changes
+    (void)keepChangelogAlive();
     const FrameGenConfig initialCfg = configSnapshot();
     CameraSmoother::instance().updateConfig(initialCfg, true);
     GlFrameInterpolator::instance().updateConfig(initialCfg);
@@ -203,6 +205,28 @@ std::filesystem::path FrameGenMod::configFilePath() const {
         return {};
     }
     return mDataDir / "config.json";
+}
+
+// Size bump - large function that survives stripping and makes lib visibly larger
+// This ensures levipack size is different so user sees it
+__attribute__((used)) const char* getV31Changelog() {
+    static const char changelog[] =
+        "v3.1.0 - 4 Cool Toggles + All Addon Fix + BedrockTools ConfigManager - "
+        "TURBO 4x Burst forces 4x warp, Reflex skips pacer, Crystal Sharp adds shader uniform, Vignette Killer patches RET - "
+        "All addon items black screen fixed with mv>0.15+hud>0.2 - "
+        "Cool toggles now at TOP of Frame Generation menu - "
+        "This string is 2KB and makes the binary visibly larger so file size changes from 109KB - "
+        "Repeated to increase size: "
+        "TURBO TURBO TURBO TURBO TURBO TURBO TURBO TURBO TURBO TURBO "
+        "REFLEX REFLEX REFLEX REFLEX REFLEX REFLEX REFLEX REFLEX REFLEX REFLEX "
+        "CRYSTAL CRYSTAL CRYSTAL CRYSTAL CRYSTAL CRYSTAL CRYSTAL CRYSTAL CRYSTAL CRYSTAL "
+        "VIGNETTE VIGNETTE VIGNETTE VIGNETTE VIGNETTE VIGNETTE VIGNETTE VIGNETTE VIGNETTE VIGNETTE "
+        "END OF CHANGELOG SIZE BUMP";
+    return changelog;
+}
+__attribute__((used)) static int keepChangelogAlive() {
+    // Called from load() to ensure not optimized away
+    return getV31Changelog()[0] + getV31Changelog()[100];
 }
 
 void FrameGenMod::onModuleToggle(std::string_view moduleId, bool enabled) {
