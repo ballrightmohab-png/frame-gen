@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 
+#include <nlohmann/json.hpp>
 #include <pl/ModMenu.hpp>
 
 namespace framegen {
@@ -158,6 +159,10 @@ struct FrameGenConfig {
 
     void normalize() noexcept;
     void applyPreset(QualityPreset newPreset) noexcept;
+
+    // BedrockTools-style JSON with ALL toggles (for ConfigManager Modules["JNGS Frame Gen"])
+    nlohmann::json toJson() const;
+    void fromJson(const nlohmann::json& j);
 };
 
 const char *presetName(QualityPreset preset) noexcept;
@@ -193,5 +198,9 @@ bool loadConfigFromFile(const std::filesystem::path &path,
                         FrameGenConfig &outConfig);
 bool saveConfigToFile(const std::filesystem::path &path,
                       const FrameGenConfig &config);
+
+// BedrockTools ConfigManager integration - ALL toggles via Modules["JNGS Frame Gen"] with worker thread
+bool saveConfigViaManager(const FrameGenConfig &config);
+bool loadConfigViaManager(FrameGenConfig &outConfig);
 
 } // namespace framegen

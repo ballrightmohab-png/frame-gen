@@ -1,4 +1,5 @@
 #include "FrameGenConfig.hpp"
+#include "ConfigManager.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -1294,6 +1295,157 @@ bool saveConfigToFile(const std::filesystem::path &path,
         << "}\n";
 
     return out.good();
+}
+
+// BedrockTools-style ALL toggles JSON - every single toggle under Modules["JNGS Frame Gen"]
+nlohmann::json FrameGenConfig::toJson() const {
+    FrameGenConfig c = *this;
+    c.normalize();
+    nlohmann::json j;
+    // BedrockTools Module base fields
+    j["masterEnabled"] = true;
+    j["keybindActive"] = true;
+    j["keybind"] = 0;
+    j["enabled"] = (c.frameGenMode != FrameGenMode::Off);
+    // ALL toggles - every config value
+    j["schema_version"] = c.schemaVersion;
+    j[keys::kPreset] = static_cast<int>(c.preset);
+    j[keys::kFrameGenMode] = static_cast<int>(c.frameGenMode);
+    j[keys::kFrameGenMultiplier] = c.frameGenMultiplier;
+    j[keys::kBlendStrength] = c.blendStrength;
+    j[keys::kMotionScale] = c.motionScale;
+    j[keys::kHudProtection] = c.hudProtection;
+    j[keys::kSceneCutThreshold] = c.sceneCutThreshold;
+    j[keys::kCameraSmoothingMode] = static_cast<int>(c.cameraSmoothingMode);
+    j[keys::kCameraSmoothness] = c.cameraSmoothness;
+    j[keys::kCameraResponsiveness] = c.cameraResponsiveness;
+    j[keys::kMicroDeadzone] = c.microDeadzone;
+    j[keys::kSpikeFilterDeg] = c.spikeFilterDeg;
+    j[keys::kFovScaling] = c.fovScaling;
+    j[keys::kAutoTune] = c.autoTune;
+    j[keys::kTargetFps] = c.targetFps;
+    j[keys::kHudOptimizerMode] = static_cast<int>(c.hudOptimizerMode);
+    j[keys::kHudLatencyFlush] = c.hudLatencyFlush;
+    j[keys::kHudStaticScreenBoost] = c.hudStaticScreenBoost;
+    j[keys::kClearScreenOverlays] = c.clearScreenOverlays;
+    j[keys::kEnableMotionBlur] = c.enableMotionBlur;
+    j[keys::kShowHud] = c.showHud;
+    j[keys::kHudStyle] = static_cast<int>(c.hudStyle);
+    j[keys::kHudOpacity] = c.hudOpacity;
+    j[keys::kHudPosX] = c.hudPosX;
+    j[keys::kHudPosY] = c.hudPosY;
+    // Legacy aliases for UI compat
+    j["hudPosX"] = c.hudPosX;
+    j["hudPosY"] = c.hudPosY;
+    j["masterEnabled"] = (c.frameGenMode != FrameGenMode::Off);
+    return j;
+}
+
+void FrameGenConfig::fromJson(const nlohmann::json& j) {
+    auto getInt = [&](const char* k, int& dst) {
+        if (j.contains(k) && j[k].is_number_integer()) dst = j[k].get<int>();
+        else if (j.contains(k) && j[k].is_number()) dst = static_cast<int>(j[k].get<float>());
+    };
+    auto getFloat = [&](const char* k, float& dst) {
+        if (j.contains(k) && j[k].is_number()) dst = j[k].get<float>();
+    };
+    auto getBool = [&](const char* k, bool& dst) {
+        if (j.contains(k) && j[k].is_boolean()) dst = j[k].get<bool>();
+        else if (j.contains(k) && j[k].is_number()) dst = (j[k].get<int>() != 0);
+    };
+    // Try both direct and string values (BedrockTools saves some as strings)
+    auto getIntFlex = [&](const char* k, int& dst) {
+        if (j.contains(k)) {
+            if (j[k].is_string()) { dst = std::atoi(j[k].get<std::string>().c_str()); }
+            else getInt(k, dst);
+        }
+    };
+    auto getFloatFlex = [&](const char* k, float& dst) {
+        if (j.contains(k)) {
+            if (j[k].is_string()) { dst = std::atof(j[k].get<std::string>().c_str()); }
+            else getFloat(k, dst);
+        }
+    };
+    auto getBoolFlex = [&](const char* k, bool& dst) {
+        if (j.contains(k)) {
+            if (j[k].is_string()) {
+                std::string s = j[k].get<std::string>();
+                if (s=="true"||s=="1"||s=="on") dst=true;
+                else if (s=="false"||s=="0"||s=="off") dst=false;
+            } else getBool(k, dst);
+        }
+    };
+
+    int presetInt = static_cast<int>(preset);
+    getIntFlex(keys::kPreset, presetInt);
+    preset = static_cast<QualityPreset>(std::clamp(presetInt, 0, 4));
+
+    int modeInt = static_cast<int>(frameGenMode);
+    getIntFlex(keys::kFrameGenMode, modeInt);
+    frameGenMode = static_cast<FrameGenMode>(std::clamp(modeInt, 0, 2));
+
+    getIntFlex(keys::kFrameGenMultiplier, frameGenMultiplier);
+    getFloatFlex(keys::kBlendStrength, blendStrength);
+    getFloatFlex(keys::kMotionScale, motionScale);
+    getFloatFlex(keys::kHudProtection, hudProtection);
+    getFloatFlex(keys::kSceneCutThreshold, sceneCutThreshold);
+
+    int camInt = static_cast<int>(cameraSmoothingMode);
+    getIntFlex(keys::kCameraSmoothingMode, camInt);
+    cameraSmoothingMode = static_cast<CameraSmoothingMode>(std::clamp(camInt, 0, 3));
+
+    getFloatFlex(keys::kCameraSmoothness, cameraSmoothness);
+    getFloatFlex(keys::kCameraResponsiveness, cameraResponsiveness);
+    getFloatFlex(keys::kMicroDeadzone, microDeadzone);
+    getFloatFlex(keys::kSpikeFilterDeg, spikeFilterDeg);
+    getBoolFlex(keys::kFovScaling, fovScaling);
+
+    getBoolFlex(keys::kAutoTune, autoTune);
+    getIntFlex(keys::kTargetFps, targetFps);
+
+    int hudOptInt = static_cast<int>(hudOptimizerMode);
+    getIntFlex(keys::kHudOptimizerMode, hudOptInt);
+    hudOptimizerMode = static_cast<HudOptimizerMode>(std::clamp(hudOptInt, 0, 2));
+    getBoolFlex(keys::kHudLatencyFlush, hudLatencyFlush);
+    getBoolFlex(keys::kHudStaticScreenBoost, hudStaticScreenBoost);
+    getBoolFlex(keys::kClearScreenOverlays, clearScreenOverlays);
+    getBoolFlex(keys::kEnableMotionBlur, enableMotionBlur);
+
+    getBoolFlex(keys::kShowHud, showHud);
+    int hudStyleInt = static_cast<int>(hudStyle);
+    getIntFlex(keys::kHudStyle, hudStyleInt);
+    hudStyle = static_cast<HudStyle>(std::clamp(hudStyleInt, 0, 2));
+    getIntFlex(keys::kHudOpacity, hudOpacity);
+    getFloatFlex(keys::kHudPosX, hudPosX);
+    getFloatFlex(keys::kHudPosY, hudPosY);
+    // legacy aliases
+    if (j.contains("hudPosX") && !j.contains(keys::kHudPosX)) getFloatFlex("hudPosX", hudPosX);
+    if (j.contains("hudPosY") && !j.contains(keys::kHudPosY)) getFloatFlex("hudPosY", hudPosY);
+
+    // handle masterEnabled from BedrockTools module wrapper
+    if (j.contains("masterEnabled") && j["masterEnabled"].is_boolean()) {
+        bool me = j["masterEnabled"].get<bool>();
+        if (!me) frameGenMode = FrameGenMode::Off;
+    }
+
+    normalize();
+}
+
+bool saveConfigViaManager(const FrameGenConfig& config) {
+    try {
+        nlohmann::json j = config.toJson();
+        framegen::config::ConfigManager::get().saveConfig(j);
+        return true;
+    } catch (...) { return false; }
+}
+
+bool loadConfigViaManager(FrameGenConfig& outConfig) {
+    try {
+        nlohmann::json j = framegen::config::ConfigManager::get().loadConfig();
+        if (j.is_null() || j.empty()) return false;
+        outConfig.fromJson(j);
+        return true;
+    } catch (...) { return false; }
 }
 
 } // namespace framegen

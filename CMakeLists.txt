@@ -18,11 +18,13 @@ add_library(framegen SHARED
     src/GlFrameInterpolator.cpp
     src/HudRenderer.cpp
     src/FrameGenMod.cpp
+    src/ConfigManager.cpp
 )
 
 target_include_directories(framegen PRIVATE
     src
     preloader_headers
+    include
 )
 
 # Build-time stub of libpreloader.so so libjngsframegen.so records DT_NEEDED
@@ -62,11 +64,13 @@ else()
         src/GlFrameInterpolator.cpp
         src/HudRenderer.cpp
         src/FrameGenMod.cpp
+        src/ConfigManager.cpp
         tests/framegen_test_suite.cpp
     )
     target_include_directories(framegen_test_suite PRIVATE
         src
         preloader_headers
+        include
         tests/host_stubs
     )
     target_link_libraries(framegen_test_suite PRIVATE

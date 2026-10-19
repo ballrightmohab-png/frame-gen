@@ -1,4 +1,5 @@
 #include "FrameGenMod.hpp"
+#include "ConfigManager.hpp"
 
 #include <chrono>
 
@@ -50,10 +51,28 @@ bool FrameGenMod::load(pl::mod::ModContext &context) {
         }
 
         const auto cfgPath = mDataDir / "config.json";
+        // BedrockTools-style: try ConfigManager (Modules["JNGS Frame Gen"] with worker thread) first, then legacy file
+#if defined(__ANDROID__)
+        FrameGenConfig bedCfg;
+        bool bedLoaded = loadConfigViaManager(bedCfg);
+        if (bedLoaded) {
+            mConfig = bedCfg;
+            mConfig.normalize();
+            // Keep legacy file in sync for LeviLauncher configDir migration
+            saveConfigToFile(cfgPath, mConfig);
+        } else
+#endif
+#if !defined(__ANDROID__)
         if (!loadConfigFromFile(cfgPath, mConfig)) {
+#else
+        if (!bedLoaded && !loadConfigFromFile(cfgPath, mConfig)) {
+#endif
             mConfig = FrameGenConfig{};
             mConfig.normalize();
             saveConfigToFile(cfgPath, mConfig);
+#if defined(__ANDROID__)
+            saveConfigViaManager(mConfig);
+#endif
         }
     }
 
@@ -165,6 +184,10 @@ bool FrameGenMod::disable(pl::mod::ModContext & /*context*/) {
 bool FrameGenMod::unload(pl::mod::ModContext &context) {
     disable(context);
     saveConfigToFile(configFilePath(), configSnapshot());
+#if defined(__ANDROID__)
+    saveConfigViaManager(configSnapshot());
+    config::ConfigManager::get().flush();
+#endif
     modLogger().info("{} unloaded", kModName);
     return true;
 }
@@ -300,6 +323,10 @@ void FrameGenMod::syncSubsystemsAndPersist(bool refreshSchema) {
     }
 
     saveConfigToFile(configFilePath(), cfg);
+#if defined(__ANDROID__)
+    // BedrockTools-style: ALL toggles via ConfigManager Modules["JNGS Frame Gen"] with 150ms debounce + atomic .tmp rename
+    saveConfigViaManager(cfg);
+#endif
 
     if (refreshSchema) {
         HudRenderer::trySetConfigSchemaJson(

@@ -42,6 +42,7 @@ struct JNIEnv {
     jobject GetObjectField(jobject, jfieldID) { return nullptr; }
     jint GetIntField(jobject, jfieldID) { return 0; }
     jfloat GetFloatField(jobject, jfieldID) { return 0.0f; }
+    void SetIntField(jobject, jfieldID, jint) {}
     jstring NewStringUTF(const char *) { return nullptr; }
 };
 
