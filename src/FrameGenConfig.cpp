@@ -630,8 +630,24 @@ ConfigApplyResult applyConfigKeyValue(FrameGenConfig &config,
 
 void appendV1ModuleConfigs(pl::modmenu::ModuleBuilder &builder,
                            const FrameGenConfig &config) {
-    // Original LeviFrame Gen toggles ONLY - using BedrockTools WAY (ConfigManager worker) not their toggles
+    // Cool toggles FIRST so they are actually seen at top of Frame Generation menu
     builder
+        .config(keys::kTurboMode,
+                "TURBO 4x Burst (forces 4x warp)",
+                pl::modmenu::ConfigType::Toggle,
+                config.turboMode ? "true" : "false")
+        .config(keys::kReflexMode,
+                "Reflex Low Latency (instant present)",
+                pl::modmenu::ConfigType::Toggle,
+                config.reflexMode ? "true" : "false")
+        .config(keys::kCrystalSharp,
+                "Crystal Sharp (extra sharp, zero ghost)",
+                pl::modmenu::ConfigType::Toggle,
+                config.crystalSharp ? "true" : "false")
+        .config(keys::kKillVignette,
+                "Vignette Killer (kills dark overlay)",
+                pl::modmenu::ConfigType::Toggle,
+                config.killVignette ? "true" : "false")
         .config(keys::kPreset,
                 "Preset (0=PowerSaver, 1=Balanced, 2=Smooth, 3=Ultra, 4=Custom)",
                 pl::modmenu::ConfigType::SliderInt,
@@ -706,22 +722,6 @@ void appendV1ModuleConfigs(pl::modmenu::ModuleBuilder &builder,
                 "HUD Optimizer: Inventory & UI Screen Boost",
                 pl::modmenu::ConfigType::Toggle,
                 config.hudStaticScreenBoost ? "true" : "false")
-        .config(keys::kTurboMode,
-                "⚡ TURBO 4x Burst (forces 4x warp, max FPS)",
-                pl::modmenu::ConfigType::Toggle,
-                config.turboMode ? "true" : "false")
-        .config(keys::kReflexMode,
-                "🚀 Reflex Low Latency (instant present, no wait)",
-                pl::modmenu::ConfigType::Toggle,
-                config.reflexMode ? "true" : "false")
-        .config(keys::kCrystalSharp,
-                "💎 Crystal Sharp (extra sharp, zero ghost)",
-                pl::modmenu::ConfigType::Toggle,
-                config.crystalSharp ? "true" : "false")
-        .config(keys::kKillVignette,
-                "🌑 Vignette Killer (kills dark overlay + particles)",
-                pl::modmenu::ConfigType::Toggle,
-                config.killVignette ? "true" : "false")
         .config(keys::kClearScreenOverlays,
                 "HUD Optimizer: Remove All Screen Overlays",
                 pl::modmenu::ConfigType::Toggle,
@@ -1116,22 +1116,22 @@ std::string buildV2ConfigSchemaJson(const FrameGenConfig &config,
               "Keeps the screen 100% clean with zero floating logos or boxes.",
               config.clearScreenOverlays, true, {}, {});
 
-    // Cool toggles - actually do something, stacked with original
-    addToggle(keys::kTurboMode, "pacing", "⚡ Cool Toggles",
-              "⚡ TURBO 4x Burst",
-              "Forces 4x Multi-Swap max FPS burst — actually switches to 4x warp + 0.90 blend, bypasses Auto-Tune.",
+    // Cool toggles - actually do something, VISIBLE in Frame Generation tab (not hidden in pacing)
+    addToggle(keys::kTurboMode, "framegen", "Cool Toggles",
+              "TURBO 4x Burst",
+              "Forces 4x Multi-Swap max FPS burst — actually switches to 4x warp + 0.90 blend, bypasses Auto-Tune. Visible here so you see it.",
               config.turboMode, false, {}, {});
-    addToggle(keys::kReflexMode, "pacing", "⚡ Cool Toggles",
-              "🚀 Reflex Low Latency",
-              "Bypasses Frame Pacer wait — presents instantly. Actually skips paceForTargetFps, 1ms less latency.",
+    addToggle(keys::kReflexMode, "framegen", "Cool Toggles",
+              "Reflex Low Latency",
+              "Bypasses Frame Pacer wait — presents instantly. Actually skips paceForTargetFps, 1ms less latency. Visible here.",
               config.reflexMode, false, {}, {});
-    addToggle(keys::kCrystalSharp, "pacing", "⚡ Cool Toggles",
-              "💎 Crystal Sharp",
-              "Extra sharp — forces shader finalWeight ghost protection to 100% sharp. Actually clamps edgeGuard to 1.0.",
+    addToggle(keys::kCrystalSharp, "framegen", "Cool Toggles",
+              "Crystal Sharp",
+              "Extra sharp — forces shader finalWeight ghost protection to 100% sharp. Actually clamps edgeGuard to 1.0. Visible here.",
               config.crystalSharp, true, {}, {});
-    addToggle(keys::kKillVignette, "pacing", "⚡ Cool Toggles",
-              "🌑 Vignette Killer",
-              "Kills dark vignette overlay + sculk/warden particles for +20% FPS. Actually patches renderVignette to RET.",
+    addToggle(keys::kKillVignette, "framegen", "Cool Toggles",
+              "Vignette Killer",
+              "Kills dark vignette overlay + sculk/warden particles for +20% FPS. Actually patches renderVignette to RET. Visible here.",
               config.killVignette, true, {}, {});
     addToggle(keys::kEnableMotionBlur, "pacing", "HUD Optimizer",
               "Motion Blur",
