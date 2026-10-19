@@ -25,8 +25,9 @@ jobs:
       - name: Run Host Simulation & Unit Test Suite
         run: |
           g++ -std=c++20 -O2 -Wall -Wextra -Werror \
-            -Isrc -Ipreloader_headers -Itests/host_stubs \
+            -Isrc -Ipreloader_headers -Iinclude -Itests/host_stubs \
             src/FrameGenConfig.cpp \
+            src/ConfigManager.cpp \
             src/CameraSmoother.cpp \
             src/FramePacer.cpp \
             src/GlFrameInterpolator.cpp \
