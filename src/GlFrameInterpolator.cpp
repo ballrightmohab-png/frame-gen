@@ -914,9 +914,11 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
                         swapResult = mOrigSwapBuffers(dpy, surface);
                         if (mTexPrev == 0 || mTexCur == 0) { mHasFrameHistory = false; }
                         else std::swap(mTexPrev, mTexCur);
-                    // LOCK-IN GUARD 3: Extreme motion (>0.45) or holding item + east/west (>0.35) — skip if really extreme
+                    // LOCK-IN GUARD 3: Custom items (not originally from game) cause black with lower thresholds
+                    // Vanilla holding: >0.35 + hudProtection>0.5, Custom holding: >0.25 + hudProtection>0.3 (custom items have different HUD protection)
                     } else if ((std::abs(motion.mvU) > 0.45f || std::abs(motion.mvV) > 0.45f) ||
-                               ((std::abs(motion.mvU) > 0.35f || std::abs(motion.mvV) > 0.35f) && cfg.hudProtection > 0.5f)) {
+                               ((std::abs(motion.mvU) > 0.35f || std::abs(motion.mvV) > 0.35f) && cfg.hudProtection > 0.5f) ||
+                               ((std::abs(motion.mvU) > 0.25f || std::abs(motion.mvV) > 0.25f) && cfg.hudProtection > 0.3f)) {
                         swapResult = mOrigSwapBuffers(dpy, surface);
                         std::swap(mTexPrev, mTexCur);
                     } else {
