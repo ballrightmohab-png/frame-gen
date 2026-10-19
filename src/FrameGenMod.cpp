@@ -76,8 +76,6 @@ bool FrameGenMod::load(pl::mod::ModContext &context) {
         }
     }
 
-    // Keep size bump alive so levipack size visibly changes
-    (void)keepChangelogAlive();
     const FrameGenConfig initialCfg = configSnapshot();
     CameraSmoother::instance().updateConfig(initialCfg, true);
     GlFrameInterpolator::instance().updateConfig(initialCfg);
