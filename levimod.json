@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "jngsframegen",
+  "name": "JNGS Frame Gen",
+  "author": "JNGS",
+  "version": "3.1.0",
+  "description": "JNGS Frame Gen v3.1.0 - 4 Cool Toggles + All Addon Black Fix + BedrockTools ConfigManager",
+  "type": "preload-native",
+  "entry": "libjngsframegen.so",
+  "minecraft_versions": [],
+  "icon": "icon.png",
+  "overwrite_files": [
+    "manifest.json",
+    "levimod.json",
+    "libjngsframegen.so",
+    "icon.png",
+    "config/config.json"
+  ],
+  "overwrite_folders": [
+    "config"
+  ]
+}
