@@ -637,17 +637,30 @@ void GlFrameInterpolator::destroyGlResources() noexcept {
     resetTemporalState();
 }
 
-void GlFrameInterpolator::captureBackbufferToTexture(GLuint targetTex) noexcept {
+bool GlFrameInterpolator::captureBackbufferToTexture(GLuint targetTex) noexcept {
+    if (targetTex == 0 || mSurfaceWidth < 16 || mSurfaceHeight < 16) return false;
+    clearGlErrors();
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, targetTex);
     glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, mSurfaceWidth,
                         mSurfaceHeight);
+    const GLenum err = glGetError();
+    if (err != GL_NO_ERROR) {
+        return false;
+    }
+    return true;
 }
 
-void GlFrameInterpolator::drawSynthesizedQuad(float mvU, float mvV, float phase,
+bool GlFrameInterpolator::drawSynthesizedQuad(float mvU, float mvV, float phase,
                                               float blendWeight,
                                               float hudProtection) noexcept {
+    if (mSynthesisProgram == 0 || mTexPrev == 0 || mTexCur == 0) return false;
+    if (mSurfaceWidth < 16 || mSurfaceHeight < 16) return false;
+    mvU = std::clamp(mvU, -0.5f, 0.5f);
+    mvV = std::clamp(mvV, -0.5f, 0.5f);
+    phase = std::clamp(phase, 0.0f, 1.0f);
+    clearGlErrors();
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, mSurfaceWidth, mSurfaceHeight);
 
@@ -659,6 +672,7 @@ void GlFrameInterpolator::drawSynthesizedQuad(float mvU, float mvV, float phase,
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
     glUseProgram(mSynthesisProgram);
+    if (glGetError() != GL_NO_ERROR) return false;
 
     if (gBindVertexArrayFn != nullptr) {
         gBindVertexArrayFn(0);
@@ -717,9 +731,12 @@ void GlFrameInterpolator::drawSynthesizedQuad(float mvU, float mvV, float phase,
     }
 
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    const GLenum drawErr = glGetError();
 
     glDisableVertexAttribArray(posLoc);
     glDisableVertexAttribArray(uvLoc);
+    if (drawErr != GL_NO_ERROR) return false;
+    return true;
 }
 
 EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
@@ -862,26 +879,29 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
                     }
                 }
             } else {
-                captureBackbufferToTexture(mTexCur);
-
-                if (!mHasFrameHistory || isSceneCut) {
+                // LOCK-IN GUARD 1: Validate capture — tiled GPUs can fail copy, check and fallback before warp
+                if (!captureBackbufferToTexture(mTexCur)) {
+                    ++mConsecutiveGlErrors;
+                    if (mConsecutiveGlErrors > 8) resetTemporalState();
+                    swapResult = mOrigSwapBuffers(dpy, surface);
+                    if (!mHasFrameHistory) { std::swap(mTexPrev, mTexCur); mHasFrameHistory = true; }
+                    else if (mTexPrev != 0 && mTexCur != 0) std::swap(mTexPrev, mTexCur);
+                } else if (!mHasFrameHistory || isSceneCut) {
                     // First frame or scene cut: seed history without blending
                     std::swap(mTexPrev, mTexCur);
                     mHasFrameHistory = true;
                     swapResult = mOrigSwapBuffers(dpy, surface);
                 } else {
-                    // Polish: black screen fix for all directions + holding item
-                    // Previously only east/west, now any large motion or uninitialized history causes black
-                    // if warp samples outside. Skip warp and show real frame to keep it polished.
-                    const bool hasLargeMotion = std::abs(motion.mvU) > 0.30f || std::abs(motion.mvV) > 0.30f;
-                    const bool hasUninitializedHistory = !mHasFrameHistory || mTexPrev == 0 || mTexCur == 0;
-                    const bool shouldSkipWarpForPolish = hasLargeMotion || hasUninitializedHistory || isSceneCut;
-                    // Also keep the original east/west + holding item check for specifically that bug
-                    const bool isEastWestBug = hasLargeMotion && cfg.hudProtection > 0.5f;
-                    if (shouldSkipWarpForPolish || isEastWestBug) {
+                    // LOCK-IN GUARD 2: Validate history textures — stale/0 textures = guaranteed black
+                    if (mTexPrev == 0 || mTexCur == 0 || !mHasFrameHistory) {
                         swapResult = mOrigSwapBuffers(dpy, surface);
-                        if (mTexPrev != 0 && mTexCur != 0) std::swap(mTexPrev, mTexCur);
-                        else mHasFrameHistory = true;
+                        if (mTexPrev == 0 || mTexCur == 0) { mHasFrameHistory = false; }
+                        else std::swap(mTexPrev, mTexCur);
+                    // LOCK-IN GUARD 3: Extreme motion (>0.45) or holding item + east/west (>0.35) — skip if really extreme
+                    } else if ((std::abs(motion.mvU) > 0.45f || std::abs(motion.mvV) > 0.45f) ||
+                               ((std::abs(motion.mvU) > 0.35f || std::abs(motion.mvV) > 0.35f) && cfg.hudProtection > 0.5f)) {
+                        swapResult = mOrigSwapBuffers(dpy, surface);
+                        std::swap(mTexPrev, mTexCur);
                     } else {
                     const bool canMultiSwap =
                         (cfg.frameGenMode ==
@@ -909,12 +929,14 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
                             if (mPresentationTimeFn != nullptr) {
                                 mPresentationTimeFn(dpy, surface, synthTs);
                             }
-                            // JNGS: single-phase warp per swap — no multi-phase
-                            // averaging, so generated frames stay razor sharp
-                            // and 800 can feel like 800 at high base FPS.
-                            drawSynthesizedQuad(motion.mvU, motion.mvV, phase,
+                            // LOCK-IN GUARD 4: drawSynthesizedQuad can fail (shader/tiled GPU) — fallback to real if it does
+                            if (!drawSynthesizedQuad(motion.mvU, motion.mvV, phase,
                                                 cfg.blendStrength,
-                                                cfg.hudProtection);
+                                                cfg.hudProtection)) {
+                                allSwapsOk = false;
+                                ++mConsecutiveGlErrors;
+                                break;
+                            }
                             if (mOrigSwapBuffers(dpy, surface) != EGL_TRUE) {
                                 allSwapsOk = false;
                                 break;
@@ -930,10 +952,14 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
                             if (mPresentationTimeFn != nullptr) {
                                 mPresentationTimeFn(dpy, surface, finalTs);
                             }
-                            drawSynthesizedQuad(motion.mvU, motion.mvV, 1.0f,
+                            if (!drawSynthesizedQuad(motion.mvU, motion.mvV, 1.0f,
                                                 cfg.blendStrength * 0.35f,
-                                                cfg.hudProtection);
-                            swapResult = mOrigSwapBuffers(dpy, surface);
+                                                cfg.hudProtection)) {
+                                ++mConsecutiveGlErrors;
+                                swapResult = EGL_FALSE;
+                            } else {
+                                swapResult = mOrigSwapBuffers(dpy, surface);
+                            }
                             if (swapResult == EGL_TRUE) {
                                 mLastPresentedTimestampNs = finalTs;
                                 std::swap(mTexPrev, mTexCur);
@@ -963,21 +989,30 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
                                 ? (cfg.blendStrength * 0.45f)
                                 : (cfg.blendStrength * multBoost);
                         const float singlePhase = 0.5f;
-                        drawSynthesizedQuad(motion.mvU, motion.mvV, singlePhase,
-                                            effectiveBlend, cfg.hudProtection);
-                        swapResult = mOrigSwapBuffers(dpy, surface);
-                        if (swapResult == EGL_TRUE) {
+                        if (!drawSynthesizedQuad(motion.mvU, motion.mvV, singlePhase,
+                                            effectiveBlend, cfg.hudProtection)) {
+                            ++mConsecutiveGlErrors;
+                            swapResult = mOrigSwapBuffers(dpy, surface);
                             std::swap(mTexPrev, mTexCur);
-                            synthesizedThisSwap = effectiveMult - 1;
-                            activeMultiplier = effectiveMult;
-                            mConsecutiveGlErrors = 0;
-                            usedRealWarp = true;
+                        } else {
+                            swapResult = mOrigSwapBuffers(dpy, surface);
+                        if (swapResult == EGL_TRUE) {
+                            if (mConsecutiveGlErrors < 6) {
+                                std::swap(mTexPrev, mTexCur);
+                                synthesizedThisSwap = effectiveMult - 1;
+                                activeMultiplier = effectiveMult;
+                                mConsecutiveGlErrors = 0;
+                                usedRealWarp = true;
+                            } else {
+                                std::swap(mTexPrev, mTexCur);
+                            }
                         } else {
                             ++mConsecutiveGlErrors;
                             resetTemporalState();
                         }
+                        }
                     }
-                    } // end isHoldingItemLargeMotion else
+                    } // end guards
                 }
             }
         }

@@ -100,8 +100,8 @@ private:
     bool ensureGlResources(GLsizei width, GLsizei height) noexcept;
     void destroyGlResources() noexcept;
     bool compileSynthesisProgram() noexcept;
-    void captureBackbufferToTexture(GLuint targetTex) noexcept;
-    void drawSynthesizedQuad(float mvU, float mvV, float phase,
+    bool captureBackbufferToTexture(GLuint targetTex) noexcept;
+    bool drawSynthesizedQuad(float mvU, float mvV, float phase,
                              float blendWeight, float hudProtection) noexcept;
     void resetTemporalState() noexcept;
 

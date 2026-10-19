@@ -619,11 +619,41 @@ void HudRenderer::optimizeAndroidHudAndOverlays(
                                                         setElevationMid, 0.0f);
                                     clearJniException();
                                 }
-                                // Polished: also clear dim behind and ensure no black overlay
+                                // LOCK-IN: Full dim/black lock-in — clear alpha, visibility, dim flags
                                 jmethodID setAlphaMid = env->GetMethodID(hudCls, "setAlpha", "(F)V");
                                 if (!clearJniException() && setAlphaMid != nullptr) {
                                     env->CallVoidMethod(hudView, setAlphaMid, 1.0f);
                                     clearJniException();
+                                }
+                                jmethodID setVisMid = env->GetMethodID(hudCls, "setVisibility", "(I)V");
+                                if (!clearJniException() && setVisMid != nullptr) {
+                                    if (moduleEnabled && config.hudOptimizerMode != HudOptimizerMode::Off && !config.showHud) {
+                                    } else {
+                                        env->CallVoidMethod(hudView, setVisMid, 0);
+                                        clearJniException();
+                                    }
+                                }
+                                jmethodID getLpMid = env->GetMethodID(hudCls, "getLayoutParams", "()Landroid/view/ViewGroup$LayoutParams;");
+                                if (!clearJniException() && getLpMid != nullptr) {
+                                    jobject lp = env->CallObjectMethod(hudView, getLpMid);
+                                    if (!clearJniException() && lp != nullptr) {
+                                        jclass lpCls = env->GetObjectClass(lp);
+                                        jfieldID flagsFid = env->GetFieldID(lpCls, "flags", "I");
+                                        if (!clearJniException() && flagsFid != nullptr) {
+                                            jint flags = env->GetIntField(lp, flagsFid);
+                                            const jint FLAG_DIM_BEHIND = 0x2;
+                                            if ((flags & FLAG_DIM_BEHIND) != 0) {
+                                                env->SetIntField(lp, flagsFid, flags & ~FLAG_DIM_BEHIND);
+                                                jmethodID setLpMid = env->GetMethodID(hudCls, "setLayoutParams", "(Landroid/view/ViewGroup$LayoutParams;)V");
+                                                if (!clearJniException() && setLpMid != nullptr) {
+                                                    env->CallVoidMethod(hudView, setLpMid, lp);
+                                                    clearJniException();
+                                                }
+                                            }
+                                        }
+                                        env->DeleteLocalRef(lpCls);
+                                        env->DeleteLocalRef(lp);
+                                    }
                                 }
                                 if (setWillNotDrawMid != nullptr) {
                                     const bool skipCanvasDraw =
