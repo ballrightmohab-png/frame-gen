@@ -914,11 +914,12 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
                         swapResult = mOrigSwapBuffers(dpy, surface);
                         if (mTexPrev == 0 || mTexCur == 0) { mHasFrameHistory = false; }
                         else std::swap(mTexPrev, mTexCur);
-                    // LOCK-IN GUARD 3: Custom items (not originally from game) cause black with lower thresholds
-                    // Vanilla holding: >0.35 + hudProtection>0.5, Custom holding: >0.25 + hudProtection>0.3 (custom items have different HUD protection)
+                    // LOCK-IN GUARD 3: All addon items cause black - addon items have even lower hudProtection but still trigger
+                    // Vanilla extreme: >0.45 any, Vanilla holding: >0.35+0.5, Custom: >0.25+0.3, All addon items: >0.15+0.2 (catches every addon)
                     } else if ((std::abs(motion.mvU) > 0.45f || std::abs(motion.mvV) > 0.45f) ||
                                ((std::abs(motion.mvU) > 0.35f || std::abs(motion.mvV) > 0.35f) && cfg.hudProtection > 0.5f) ||
-                               ((std::abs(motion.mvU) > 0.25f || std::abs(motion.mvV) > 0.25f) && cfg.hudProtection > 0.3f)) {
+                               ((std::abs(motion.mvU) > 0.25f || std::abs(motion.mvV) > 0.25f) && cfg.hudProtection > 0.3f) ||
+                               ((std::abs(motion.mvU) > 0.15f || std::abs(motion.mvV) > 0.15f) && cfg.hudProtection > 0.2f)) {
                         swapResult = mOrigSwapBuffers(dpy, surface);
                         std::swap(mTexPrev, mTexCur);
                     } else {
