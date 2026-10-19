@@ -4,7 +4,7 @@
   "name": "JNGS Frame Gen",
   "author": "JNGS",
   "version": "3.1.0",
-  "description": "JNGS Frame Gen v3.1 - 4 Cool Toggles + All Addon Black Fix" — True-Motion Frame Generation (2x/3x/4x) that feels like real FPS, plus Camera Smoothing & HUD Optimizer for Minecraft Bedrock (LeviLaunchroid). Zero-dimming, ultra low latency.",
+  "description": "JNGS Frame Gen v3.1.0 - 4 Cool Toggles + All Addon Black Fix + BedrockTools ConfigManager",
   "type": "preload-native",
   "entry": "libjngsframegen.so",
   "minecraft_versions": [],
