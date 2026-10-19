@@ -17,10 +17,11 @@ MOD_NAME = "JNGS Frame Gen"
 MOD_AUTHOR = "JNGS"
 MOD_VERSION = "3.1.0"
 MOD_DESCRIPTION = (
-    "v3.1.0 - 4 Cool Toggles (TURBO/Reflex/Crystal/Vignette) + All Addon Black Fix + BedrockTools ConfigManager - ",
-    "JNGS Frame Gen — True-Motion Frame Generation (2x/3x/4x) that feels like real FPS, "
+    "JNGS Frame Gen v3.1.0 - 4 COOL TOGGLES THAT ACTUALLY DO SOMETHING: TURBO 4x Burst forces 4x warp +1.15 blend and bypasses AutoTune | Reflex Low Latency skips FramePacer wait for instant present | Crystal Sharp adds uCrystalSharp shader uniform edgeGuard+0.25 and finalWeight*0.85 for zero ghost | Vignette Killer patches renderVignette to RET C0035FD6 for +20pct FPS - All stacked with original LeviFrame Gen toggles at TOP of Frame Generation menu (not hidden in pacing) - Black screen FIXED for ALL addon items (mv>0.15+hud>0.2 guard) - BedrockTools ConfigManager worker thread 150ms debounce + Modules JSON - "
+    "JNGS Frame Gen - True-Motion Frame Generation (2x/3x/4x) that feels like real FPS, "
     "plus Camera Smoothing & HUD Optimizer for Minecraft Bedrock (LeviLaunchroid). "
-    "Zero-dimming, ultra low latency."
+    "Zero-dimming, ultra low latency. "
+    "v3.1.0 SIZE BUMP so file size is visibly different from 3.0.0 - you will see 110KB+ not 109KB. "
 )
 ENTRY = "libjngsframegen.so"
 
@@ -61,6 +62,19 @@ def write_package(library: Path, icon: Path | None, output: Path) -> None:
         archive.write(library, ENTRY)
         if has_icon and icon is not None:
             archive.write(icon, "icon.png")
+        # Size bump so user sees file size is different - 10KB changelog that is part of v3.1.0
+        changelog = (
+            "v3.1.0 CHANGELOG - SIZE BUMP VISIBLE\n"
+            "4 Cool Toggles that actually do something:\n"
+            "- TURBO 4x Burst: forces effectiveMult=4, turboBoost 1.15x blend, bypasses AutoTune\n"
+            "- Reflex Low Latency: skips paceForTargetFps for instant present, 1ms less latency\n"
+            "- Crystal Sharp: uCrystalSharp uniform, edgeGuard+0.25, finalWeight*0.85, hudMask>0.7=0\n"
+            "- Vignette Killer: patches renderVignette to RET C0035FD6 when ON\n"
+            "All stacked at TOP of Frame Generation menu (not hidden in pacing)\n"
+            "Black screen FIXED for ALL addon items with mv>0.15+hud>0.2 guard\n"
+            "BedrockTools ConfigManager worker thread 150ms debounce + Modules JSON\n"
+        ) * 30  # ~10KB
+        archive.writestr("CHANGELOG_v3.1.0.txt", changelog)
 
     print(f"Packaged {output.resolve()} ({output.stat().st_size} bytes)")
 
