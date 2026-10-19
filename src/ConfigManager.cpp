@@ -79,15 +79,12 @@ nlohmann::json ConfigManager::loadConfig() {
 
 void ConfigManager::saveConfig(const nlohmann::json& frameGenModuleJson) {
     nlohmann::json j;
-    // STACKED: Original LeviFrame Gen flat keys + BedrockTools Modules["JNGS Frame Gen"] wrapper co-exist
-    // This keeps both original LeviFrame Gen saves (flat) and new BedrockTools saves (Modules) stacked in same file
+    // Original LeviFrame Gen toggles ONLY - saved via BedrockTools WAY: Modules["JNGS Frame Gen"] + flat keys stacked for compat
     j["Modules"]["JNGS Frame Gen"] = frameGenModuleJson;
-    // Also keep flat keys for backwards compat at top level (original LeviFrame Gen)
+    // Also keep flat keys for backwards compat (original LeviFrame Gen loader)
     for (auto& [k, v] : frameGenModuleJson.items()) {
         j[k] = v;
     }
-    // Ensure original flat file also has the legacy LeviFrame keys for older loaders
-    j["schema_version"] = frameGenModuleJson.value("schema_version", 3);
 
     std::string path = getConfigPath();
     std::string payload = j.dump(2);

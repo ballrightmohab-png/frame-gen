@@ -630,8 +630,7 @@ ConfigApplyResult applyConfigKeyValue(FrameGenConfig &config,
 
 void appendV1ModuleConfigs(pl::modmenu::ModuleBuilder &builder,
                            const FrameGenConfig &config) {
-    // STACKED: Original LeviFrame Gen toggles + BedrockTools extended toggles in same module, same scroll
-    // Original block (LeviFrame Gen core) first, then BedrockTools-style extended block stacked below - both visible together
+    // Original LeviFrame Gen toggles ONLY - using BedrockTools WAY (ConfigManager worker) not their toggles
     builder
         .config(keys::kPreset,
                 "Preset (0=PowerSaver, 1=Balanced, 2=Smooth, 3=Ultra, 4=Custom)",
@@ -784,16 +783,16 @@ std::string buildV2ConfigSchemaJson(const FrameGenConfig &config,
     };
 
     ConfigSchemaBuilder schema;
-    // STACKED layout: Original LeviFrame Gen (Frame Generation + Camera) + BedrockTools extended (HUD Optimizer & Pacing) in one paginated module
+    // Original LeviFrame Gen toggles ONLY - just using BedrockTools WAY (worker thread + Modules JSON) not their toggles
     schema.defaultCategory("general")
         .category("general", "Presets & Multiplier",
                   "Quick profiles, 2x/3x/4x frame multiplier, and live telemetry.")
-        .category("framegen", "Frame Generation [Original LeviFrame]",
-                  "Multi-rate sub-frame synthesis and FPS multiplication. (Original)")
-        .category("camera", "Camera Smoothing [Original LeviFrame]",
-                  "Sub-frame camera smoothing with 100% angle conservation. (Original)")
-        .category("pacing", "HUD Optimizer & Pacing [BedrockTools Extended]",
-                  "HUD latency optimizer, UI screen boost, and frame pacing. (Stacked BedrockTools-style)");
+        .category("framegen", "Frame Generation",
+                  "Multi-rate sub-frame synthesis and FPS multiplication.")
+        .category("camera", "Camera Smoothing",
+                  "Sub-frame camera smoothing with 100% angle conservation.")
+        .category("pacing", "HUD Optimizer & Pacing",
+                  "HUD latency optimizer, UI screen boost, and frame pacing.");
 
     // --- Category: general ---
     {
