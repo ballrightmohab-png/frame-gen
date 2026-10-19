@@ -711,7 +711,14 @@ void HudRenderer::optimizeGameHudForFpsBoost(
     const FrameGenConfig &config, bool moduleEnabled) noexcept {
     gHudOptimizerMode.store(static_cast<int>(config.hudOptimizerMode), std::memory_order_relaxed);
     gHudStaticBoost.store(config.hudStaticScreenBoost, std::memory_order_relaxed);
-    if (!moduleEnabled || config.hudOptimizerMode == HudOptimizerMode::Off) {
+    if (!moduleEnabled) {
+        return;
+    }
+    // Cool toggles: Vignette Killer actually controls vignette/particle patches
+    // If killVignette is OFF, skip the heavy patches (keep vignette for those who want it)
+    // HUD optimizer still does other boosts even if killVignette off, but vignette stays if toggle off
+    const bool doVignetteKill = config.killVignette;
+    if (config.hudOptimizerMode == HudOptimizerMode::Off && !doVignetteKill && !config.turboMode && !config.reflexMode) {
         return;
     }
     bool doFpsAbuse = config.hudStaticScreenBoost;
@@ -722,6 +729,8 @@ void HudRenderer::optimizeGameHudForFpsBoost(
     }
 #if defined(__ANDROID__)
     // 1) Vignette: full-screen dark overlay — biggest HUD fill-rate cost.
+    //    Only if killVignette toggle ON - actually patches to RET
+    if (doVignetteKill) {
     //    Try to patch its renderer to RET (AArch64: C0035FD6). Best-effort.
     try {
         const char* vignetteSyms[] = {
@@ -745,6 +754,7 @@ void HudRenderer::optimizeGameHudForFpsBoost(
             (void)vignetteAddr;
         }
     } catch (...) {}
+    } // end doVignetteKill
 
     // 2) Enchant glint: bajillion draw-calls for hotbar. Make it static.
     try {
@@ -768,8 +778,8 @@ void HudRenderer::optimizeGameHudForFpsBoost(
     } catch (...) {}
 
     // 3) BlueBerry Killer — base FPS 2-3x (like Blueberry FPS Boost) on top of JNGS warp.
-    //    Blueberry removes fog/particles via scripts; we do it natively with RET patches
-    //    so low-end gets the same 2-3x base + JNGS 2x-4x warp = 4-12x total, beating Blueberry.
+    //    Turbo Mode also kills particles/fog for extra FPS burst when ON
+    if (config.turboMode || doVignetteKill) {
     try {
         // Particles: AD FPS BOOSTER v2.2 — sculk spread, warden shrieker, 177 particles (FPS Optimizer Max)
         const char* particleSyms[] = {
@@ -812,6 +822,7 @@ void HudRenderer::optimizeGameHudForFpsBoost(
             }
         }
     } catch (...) {}
+    } // end turbo/particle kill
     // 4) Event-driven HUD throttling is via shouldSkipGameHudDrawThisFrame()
     //    (future GlFrameInterpolator integration). Vignette+glint+particles+fog
     //    already give ~60-80% of delete-HUD+particles gain with HUD still visible.

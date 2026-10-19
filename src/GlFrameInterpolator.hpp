@@ -145,7 +145,11 @@ private:
     GLint mUniBlendWeight = -1;
     GLint mUniHudProtection = -1;
     GLint mUniMotionBlur = -1;
+    GLint mUniCrystalSharp = -1;
     bool mMotionBlurEnabled = false;
+    bool mCrystalSharpEnabled = true;
+    bool mTurboModeEnabled = false;
+    bool mReflexModeEnabled = false;
 
     std::int64_t mLastPresentedTimestampNs = 0;
     std::uint64_t mSceneCutCount = 0;

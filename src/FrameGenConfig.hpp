@@ -42,6 +42,10 @@ inline constexpr const char *kHudLatencyFlush = "hud_latency_flush";
 inline constexpr const char *kHudStaticScreenBoost = "hud_static_screen_boost";
 inline constexpr const char *kClearScreenOverlays = "clear_screen_overlays";
 inline constexpr const char *kEnableMotionBlur = "enable_motion_blur";
+inline constexpr const char *kTurboMode = "turbo_mode";
+inline constexpr const char *kReflexMode = "reflex_mode";
+inline constexpr const char *kCrystalSharp = "crystal_sharp";
+inline constexpr const char *kKillVignette = "kill_vignette";
 
 inline constexpr const char *kShowHud = "show_hud";
 inline constexpr const char *kHudStyle = "hud_style";
@@ -149,6 +153,12 @@ struct FrameGenConfig {
 
     // Motion Blur toggle — requested to keep as setting (ON = blur, OFF = sharp, default OFF)
     bool enableMotionBlur = false;
+
+    // Cool toggles - actually do something
+    bool turboMode = false;        // Turbo 4x burst - forces 4x multi-swap with max blend
+    bool reflexMode = false;       // Reflex low latency - bypass pacer, instant present
+    bool crystalSharp = true;      // Crystal Sharp - extra sharpness, no blending ghost
+    bool killVignette = true;      // Vignette Killer - kills dark overlay for FPS
 
     // Optional Telemetry HUD (OFF by default so screen stays 100% clean)
     bool showHud = false;

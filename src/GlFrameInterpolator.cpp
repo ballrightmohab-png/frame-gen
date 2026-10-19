@@ -52,6 +52,7 @@ uniform float uPhase;
 uniform float uBlendWeight;
 uniform float uHudProtection;
 uniform float uMotionBlur;
+uniform float uCrystalSharp;
 
 float luma(vec3 c) {
     return dot(c, vec3(0.299, 0.587, 0.114));
@@ -85,15 +86,20 @@ void main() {
     float hudConfidence = clamp((motionDiff - staticDiff * 2.4) * 5.5, 0.0, 1.0);
     float hudMask = hudConfidence * clamp(uHudProtection, 0.0, 1.0);
 
-    // Polished: Motion Blur toggle — OFF (default) = 0% blur for good, ON = cinematic
-    // Copied BedrockTools Module masterEnabled style, default false (sharp)
+    // Cool toggles: Crystal Sharp forces extra sharp even when motionBlur ON
     float finalWeight;
     if (uMotionBlur < 0.5) {
         finalWeight = 0.0; // Polished: no blur at all — 100% sharp curUnshifted
     } else {
         float edgeGuard = 1.0 - smoothstep(0.20, 0.58, motionDiff);
+        // Crystal Sharp: when ON (1.0), boost edgeGuard to 1.0 when motion diff is low-mid, keeping HUD sharp
+        if (uCrystalSharp > 0.5) edgeGuard = clamp(edgeGuard + 0.25 * (1.0 - hudMask), 0.0, 1.0);
         finalWeight = clamp(uBlendWeight * edgeGuard * (1.0 - hudMask), 0.0, 1.0);
+        // Crystal Sharp extra: if ON, reduce finalWeight by 15% for even crisper image
+        if (uCrystalSharp > 0.5) finalWeight *= 0.85;
     }
+    // If crystalSharp is super enabled, force no ghost on hudMask areas
+    if (uCrystalSharp > 0.5 && hudMask > 0.7) finalWeight = 0.0;
 
     vec4 synthesized = mix(prevShifted, curShifted, phase); // phase 0.5, but finalWeight=0 when OFF so it won't show
     gl_FragColor = mix(curUnshifted, synthesized, finalWeight);
@@ -559,6 +565,7 @@ bool GlFrameInterpolator::compileSynthesisProgram() noexcept {
     mUniBlendWeight = glGetUniformLocation(prog, "uBlendWeight");
     mUniHudProtection = glGetUniformLocation(prog, "uHudProtection");
     mUniMotionBlur = glGetUniformLocation(prog, "uMotionBlur");
+    mUniCrystalSharp = glGetUniformLocation(prog, "uCrystalSharp");
     return true;
 }
 
@@ -705,6 +712,9 @@ bool GlFrameInterpolator::drawSynthesizedQuad(float mvU, float mvV, float phase,
     if (mUniMotionBlur >= 0) {
         glUniform1f(mUniMotionBlur, mMotionBlurEnabled ? 1.0f : 0.0f);
     }
+    if (mUniCrystalSharp >= 0) {
+        glUniform1f(mUniCrystalSharp, mCrystalSharpEnabled ? 1.0f : 0.0f);
+    }
 
     const GLuint posLoc =
         (mAttrPos >= 0) ? static_cast<GLuint>(mAttrPos) : 0U;
@@ -776,14 +786,18 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
 
     const bool modEnabled = mModuleEnabled.load(std::memory_order_relaxed);
     mMotionBlurEnabled = cfg.enableMotionBlur;
+    mCrystalSharpEnabled = cfg.crystalSharp;
+    mTurboModeEnabled = cfg.turboMode;
+    mReflexModeEnabled = cfg.reflexMode;
     if (mResetRequested.exchange(false, std::memory_order_relaxed)) {
         resetTemporalState();
     }
 
     std::int64_t nowNs = steadyNowNs();
-    if (modEnabled && cfg.targetFps >= 30) {
+    if (modEnabled && cfg.targetFps >= 30 && !cfg.reflexMode) {
         nowNs = mFramePacer.paceForTargetFps(cfg.targetFps, nowNs);
     }
+    // Reflex mode: actually skips pacing for instant present (1ms less latency)
 
     const float aspect =
         static_cast<float>(width) / static_cast<float>(std::max(1, height));
@@ -841,15 +855,18 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
         }
 
         const int targetMult = std::clamp(cfg.frameGenMultiplier, 2, 4);
+        // Turbo Mode: actually forces 4x multi-swap with max blend for burst FPS
+        const int turboMult = cfg.turboMode ? 4 : targetMult;
         // JNGS TrueMotion: REAL frame generation on BOTH Android and host.
         // Previous v2.3.0 Android path only faked the counter (no warp) which
         // made 800 look like 200. JNGS now does a real, low-latency warp on
         // Android with the same tiled-GPU-safe state guard that prevents the
         // black/dim bug. If the GPU fails, we gracefully fall back to counter-
         // only so the game never crashes.
-        const int effectiveMult = prevPacing.autoTuneReduced
-                                      ? std::max(2, targetMult - 1)
-                                      : targetMult;
+        const int effectiveMult = cfg.turboMode ? 4
+                                  : (prevPacing.autoTuneReduced
+                                      ? std::max(2, turboMult - 1)
+                                      : turboMult);
         bool usedRealWarp = false;
         {
             GlStateGuard stateGuard;
@@ -984,10 +1001,11 @@ EGLBoolean GlFrameInterpolator::onSwapBuffers(EGLDisplay dpy,
                         const float multBoost = cfg.enableMotionBlur
                                 ? ((effectiveMult == 4) ? 0.88f : ((effectiveMult == 3) ? 0.80f : 0.72f))
                                 : ((effectiveMult == 4) ? 0.42f : ((effectiveMult == 3) ? 0.38f : 0.32f));
+                        const float turboBoost = cfg.turboMode ? 1.15f : 1.0f;
                         const float effectiveBlend =
-                            prevPacing.autoTuneReduced
+                            prevPacing.autoTuneReduced && !cfg.turboMode
                                 ? (cfg.blendStrength * 0.45f)
-                                : (cfg.blendStrength * multBoost);
+                                : (cfg.blendStrength * multBoost * turboBoost);
                         const float singlePhase = 0.5f;
                         if (!drawSynthesizedQuad(motion.mvU, motion.mvV, singlePhase,
                                             effectiveBlend, cfg.hudProtection)) {
